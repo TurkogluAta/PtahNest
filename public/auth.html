@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PtahNest - Welcome</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="stylesheets/style.css">
+</head>
+
+<body class="auth-body">
+
+    <!-- Background lines -->
+    <div class="lines">
+        <div class="line"></div>
+        <div class="line"></div>
+        <div class="line"></div>
+        <div class="line"></div>
+        <div class="line"></div>
+    </div>
+
+    <!-- Glow background effects -->
+    <div class="glow-circle glow-1"></div>
+    <div class="glow-circle glow-2"></div>
+
+    <div class="container">
+        <div class="auth-box">
+
+            <!-- Left Side (Brand / Info Cards) -->
+            <div class="brand-panel">
+
+                <div class="logo-section">
+                    <div class="logo-title">PtahNest</div>
+                    <div class="logo-subtitle">Collaborative Project Platform</div>
+                </div>
+
+                <div class="info-cards">
+
+                    <!-- Info Card 1 -->
+                    <div class="info-card">
+                        <div class="info-card-header">
+                            <div class="info-card-title">Track Contributions</div>
+
+                            <!-- ICON: Bar Chart -->
+                            <div class="info-card-icon">
+                                <img src="pictures/icons/bar-chart.svg" alt="bar chart icon">
+                            </div>
+                        </div>
+
+                        <div class="info-card-text">
+                            Every action is logged and visible. Build your credibility transparently.
+                        </div>
+                    </div>
+
+                    <!-- Info Card 2 -->
+                    <div class="info-card">
+                        <div class="info-card-header">
+                            <div class="info-card-title">Earn Recognition</div>
+
+                            <!-- ICON: Outline Star -->
+                            <div class="info-card-icon">
+                                <img src="pictures/icons/star-outline.svg" alt="star icon">
+                            </div>
+                        </div>
+
+                        <div class="info-card-text">
+                            Gain stars and badges as you contribute. Show your expertise.
+                        </div>
+                    </div>
+
+                    <!-- Info Card 3 -->
+                    <div class="info-card">
+                        <div class="info-card-header">
+                            <div class="info-card-title">Fair Governance</div>
+
+                            <!-- ICON: User Outline -->
+                            <div class="info-card-icon">
+                                <img src="pictures/icons/users.svg" alt="user icon">
+                            </div>
+                        </div>
+
+                        <div class="info-card-text">
+                            Democratic voting system ensures everyone has a voice.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Side (Login/Register Forms) -->
+            <div class="form-panel">
+
+                <div class="message" id="message"></div>
+
+                <div class="form-header-section">
+                    <h2 class="form-title">Welcome Back</h2>
+                    <p class="form-subtitle">Sign in to continue your journey</p>
+                </div>
+
+                <!-- LOGIN FORM -->
+                <form class="form active" id="loginForm">
+
+                    <div class="input-group">
+                        <label class="input-label" for="loginEmail">Email</label>
+                        <input type="email" id="loginEmail" class="input-field" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label" for="loginPassword">Password</label>
+
+                        <div class="input-wrapper">
+                            <input type="password" id="loginPassword" class="input-field input-with-toggle" required>
+
+                            <!-- Password Toggle (Eye Icon) -->
+                            <button type="button" class="password-toggle" data-target="loginPassword">
+                                <img src="pictures/icons/eye.svg" alt="show password">
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="form-options">
+                        <div class="checkbox-wrapper">
+                            <input type="checkbox" id="remember" class="checkbox">
+                            <label for="remember" class="checkbox-label">Remember me</label>
+                        </div>
+
+                        <a href="#" class="link">Forgot password?</a>
+                    </div>
+
+                    <button type="submit" class="submit-btn">Sign In</button>
+
+                    <div class="form-footer-text">
+                        Don't have an account?
+                        <a href="#" class="switch-link" data-switch="register">Create one now</a>
+                    </div>
+                </form>
+
+                <!-- REGISTER FORM -->
+                <form class="form" id="registerForm">
+
+                    <div class="input-group">
+                        <label class="input-label" for="registerName">Full Name</label>
+                        <input type="text" id="registerName" class="input-field" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label" for="registerEmail">Email</label>
+                        <input type="email" id="registerEmail" class="input-field" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label" for="registerPassword">Password</label>
+
+                        <div class="input-wrapper">
+                            <input type="password" id="registerPassword" class="input-field input-with-toggle" required>
+
+                            <!-- Password Toggle (Eye Icon) -->
+                            <button type="button" class="password-toggle" data-target="registerPassword">
+                                <img src="pictures/icons/eye.svg" alt="show password">
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label" for="confirmPassword">Confirm Password</label>
+
+                        <div class="input-wrapper">
+                            <input type="password" id="confirmPassword" class="input-field input-with-toggle" required>
+
+                            <!-- Password Toggle (Eye Icon) -->
+                            <button type="button" class="password-toggle" data-target="confirmPassword">
+                                <img src="pictures/icons/eye.svg" alt="show password">
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="checkbox-wrapper" style="margin-bottom: 1.5rem;">
+                        <input type="checkbox" id="terms" class="checkbox" required>
+                        <label for="terms" class="checkbox-label">
+                            I agree to the Terms of Service
+                        </label>
+                    </div>
+
+                    <button type="submit" class="submit-btn">Create Account</button>
+
+                    <div class="form-footer-text">
+                        Already have an account?
+                        <a href="#" class="switch-link" data-switch="login">Sign in here</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="javascripts/auth.js"></script>
+
+</body>
+
+</html>
