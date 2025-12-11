@@ -1,14 +1,15 @@
-// Form switching via links only
+// DOM elements
 const forms = document.querySelectorAll('.form');
 const messageDiv = document.getElementById('message');
 const formTitle = document.querySelector('.form-title');
 const formSubtitle = document.querySelector('.form-subtitle');
 
+// Switch between login and register forms
 function switchToTab(tab) {
     forms.forEach(f => f.classList.remove('active'));
     document.getElementById(`${tab}Form`).classList.add('active');
 
-    // Update header text
+    // Update header text based on active form
     if (tab === 'register') {
         formTitle.textContent = 'Welcome to PtahNest';
         formSubtitle.textContent = 'Create your account to get started';
@@ -28,62 +29,81 @@ document.querySelectorAll('.switch-link').forEach(link => {
     });
 });
 
-// Password toggle
+// Password visibility toggle
 document.querySelectorAll('.password-toggle').forEach(btn => {
     btn.addEventListener('click', () => {
         const input = document.getElementById(btn.dataset.target);
 
         if (input.type === 'password') {
             input.type = 'text';
-
-            // Switch to eye-hide icon
             btn.innerHTML = `
-                <img src="pictures/icons/eye-hide.svg" alt="hide password">
+                <img src="../pictures/icons/eye-hide.svg" alt="hide password">
             `;
         } else {
             input.type = 'password';
-
-            // Switch to eye icon
             btn.innerHTML = `
-                <img src="pictures/icons/eye.svg" alt="show password">
+                <img src="../pictures/icons/eye.svg" alt="show password">
             `;
         }
     });
 });
 
-
-// Show message
+// Display feedback message to user
 function showMessage(text, type) {
     messageDiv.textContent = text;
     messageDiv.className = `message ${type} show`;
     setTimeout(() => messageDiv.classList.remove('show'), 4000);
 }
 
-// Login form
-document.getElementById('loginForm').addEventListener('submit', (e) => {
+// Login form submission
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const email = document.getElementById('loginEmail').value;
+    const identifier = document.getElementById('loginIdentifier').value;
     const password = document.getElementById('loginPassword').value;
+    const remember = document.getElementById('remember').checked;
 
-    if (!email || !password) {
+    if (!identifier || !password) {
         showMessage('Please fill in all fields', 'error');
         return;
     }
 
-    showMessage('Signing in...', 'success');
-    console.log('Login:', { email, password });
+    try {
+        showMessage('Signing in...', 'info');
+
+        const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ identifier, password, remember })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            showMessage('Login successful! Redirecting...', 'success');
+            setTimeout(() => window.location.href = '/pages/index.html', 1000);
+        } else {
+            console.error('Login failed:', response.status, data);
+            showMessage(data.message || 'Login failed', 'error');
+        }
+    } catch (error) {
+        console.error('Login error:', error);
+        showMessage('Network error: ' + error.message, 'error');
+    }
 });
 
-// Register form
-document.getElementById('registerForm').addEventListener('submit', (e) => {
+// Register form submission
+document.getElementById('registerForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const name = document.getElementById('registerName').value;
+    const username = document.getElementById('registerUsername').value;
     const email = document.getElementById('registerEmail').value;
     const password = document.getElementById('registerPassword').value;
     const confirm = document.getElementById('confirmPassword').value;
     const terms = document.getElementById('terms').checked;
 
-    if (!name || !email || !password || !confirm) {
+    // Client-side validation
+    if (!username || !email || !password || !confirm) {
         showMessage('Please fill in all fields', 'error');
         return;
     }
@@ -103,6 +123,28 @@ document.getElementById('registerForm').addEventListener('submit', (e) => {
         return;
     }
 
-    showMessage('Account created successfully!', 'success');
-    console.log('Register:', { name, email, password });
+    try {
+        showMessage('Creating account...', 'info');
+
+        const response = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ username, email, password })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            showMessage('Account created! Redirecting...', 'success');
+            setTimeout(() => window.location.href = '/pages/index.html', 1000);
+        } else {
+            console.error('Register failed:', response.status, data);
+            showMessage(data.message || 'Registration failed', 'error');
+        }
+    } catch (error) {
+        console.error('Register error:', error);
+        showMessage('Network error: ' + error.message, 'error');
+    }
 });

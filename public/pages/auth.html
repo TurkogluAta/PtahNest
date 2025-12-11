@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="stylesheets/style.css">
+    <link rel="stylesheet" href="../stylesheets/style.css">
 </head>
 
 <body class="auth-body">
@@ -48,7 +48,7 @@
 
                             <!-- ICON: Bar Chart -->
                             <div class="info-card-icon">
-                                <img src="pictures/icons/bar-chart.svg" alt="bar chart icon">
+                                <img src="../pictures/icons/bar-chart.svg" alt="bar chart icon">
                             </div>
                         </div>
 
@@ -64,7 +64,7 @@
 
                             <!-- ICON: Outline Star -->
                             <div class="info-card-icon">
-                                <img src="pictures/icons/star-outline.svg" alt="star icon">
+                                <img src="../pictures/icons/star-outline.svg" alt="star icon">
                             </div>
                         </div>
 
@@ -80,7 +80,7 @@
 
                             <!-- ICON: User Outline -->
                             <div class="info-card-icon">
-                                <img src="pictures/icons/users.svg" alt="user icon">
+                                <img src="../pictures/icons/users.svg" alt="user icon">
                             </div>
                         </div>
 
@@ -105,8 +105,8 @@
                 <form class="form active" id="loginForm">
 
                     <div class="input-group">
-                        <label class="input-label" for="loginEmail">Email</label>
-                        <input type="email" id="loginEmail" class="input-field" required>
+                        <label class="input-label" for="loginIdentifier">Email or Username</label>
+                        <input type="text" id="loginIdentifier" class="input-field" required>
                     </div>
 
                     <div class="input-group">
@@ -117,7 +117,7 @@
 
                             <!-- Password Toggle (Eye Icon) -->
                             <button type="button" class="password-toggle" data-target="loginPassword">
-                                <img src="pictures/icons/eye.svg" alt="show password">
+                                <img src="../pictures/icons/eye.svg" alt="show password">
                             </button>
                         </div>
                     </div>
@@ -143,8 +143,8 @@
                 <form class="form" id="registerForm">
 
                     <div class="input-group">
-                        <label class="input-label" for="registerName">Full Name</label>
-                        <input type="text" id="registerName" class="input-field" required>
+                        <label class="input-label" for="registerUsername">Username</label>
+                        <input type="text" id="registerUsername" class="input-field" required>
                     </div>
 
                     <div class="input-group">
@@ -160,7 +160,7 @@
 
                             <!-- Password Toggle (Eye Icon) -->
                             <button type="button" class="password-toggle" data-target="registerPassword">
-                                <img src="pictures/icons/eye.svg" alt="show password">
+                                <img src="../pictures/icons/eye.svg" alt="show password">
                             </button>
                         </div>
                     </div>
@@ -173,12 +173,12 @@
 
                             <!-- Password Toggle (Eye Icon) -->
                             <button type="button" class="password-toggle" data-target="confirmPassword">
-                                <img src="pictures/icons/eye.svg" alt="show password">
+                                <img src="../pictures/icons/eye.svg" alt="show password">
                             </button>
                         </div>
                     </div>
 
-                    <div class="checkbox-wrapper" style="margin-bottom: 1.5rem;">
+                    <div class="checkbox-wrapper checkbox-spaced">
                         <input type="checkbox" id="terms" class="checkbox" required>
                         <label for="terms" class="checkbox-label">
                             I agree to the Terms of Service
@@ -196,7 +196,7 @@
         </div>
     </div>
 
-    <script src="javascripts/auth.js"></script>
+    <script src="../javascripts/auth.js"></script>
 
 </body>
 

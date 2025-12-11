@@ -955,3 +955,19 @@ body::after {
         font-size: 1.15rem;
     }
 }
+
+/* Profile page styles */
+.profile-card {
+    margin-top: 2rem;
+    padding: 2rem;
+}
+
+.profile-data {
+    font-size: 1.1rem;
+    margin-top: 0.5rem;
+}
+
+/* Auth page checkbox spacing */
+.checkbox-spaced {
+    margin-bottom: 1.5rem;
+}
