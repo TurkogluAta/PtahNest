@@ -21,18 +21,21 @@
             <div class="header-right">
 
                 <nav class="main-nav" id="mainNav">
-                    <a href="index.html" class="nav-link">Dashboard</a>
-                    <a href="projects.html" class="nav-link">Projects</a>
                     <a href="discover.html" class="nav-link active">Discover</a>
                 </nav>
 
-                <!-- USER AVATAR -->
-                <div class="user-wrapper">
+                <!-- LOGIN BUTTON (shown when not logged in) -->
+                <a href="auth.html" class="btn btn-primary" id="loginBtn" style="display: none;">Login</a>
+
+                <!-- USER AVATAR (shown when logged in) -->
+                <div class="user-wrapper" style="display: none;">
                     <div class="user-avatar" id="userAvatar">
                         <img src="../pictures/icons/user.svg" width="18" height="18" />
                     </div>
 
                     <div class="user-dropdown" id="userDropdown">
+                        <a class="dropdown-item" href="index.html">Dashboard</a>
+                        <a class="dropdown-item" href="projects.html">Projects</a>
                         <a class="dropdown-item" href="profile.html">Profile</a>
                         <a class="dropdown-item" href="#">Logout</a>
                     </div>
@@ -48,8 +51,6 @@
 
         <!-- Mobile Menu -->
         <div class="mobile-menu" id="mobileMenu">
-            <a href="index.html" class="mobile-link">Dashboard</a>
-            <a href="projects.html" class="mobile-link">Projects</a>
             <a href="discover.html" class="mobile-link">Discover</a>
         </div>
     </header>

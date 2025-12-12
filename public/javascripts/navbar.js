@@ -1,7 +1,7 @@
 // Common navbar functionality for all pages
 
 // Authentication guard - checks if user is logged in
-// If not authenticated, redirects to login page
+// If not authenticated, redirects to login page (unless on discover page)
 async function checkAuth() {
     try {
         const response = await fetch('/api/auth/me', {
@@ -10,19 +10,56 @@ async function checkAuth() {
         });
 
         if (!response.ok) {
-            // Not authenticated - redirect to login
+            // Check if we're on discover page - if so, allow access
+            const isDiscoverPage = window.location.pathname.includes('discover.html');
+
+            if (isDiscoverPage) {
+                // User not logged in, but on discover page - that's okay
+                // Hide user avatar and show login button in nav
+                hideUserControls();
+                return null;
+            }
+
+            // Not authenticated and not on discover page - redirect to login
             window.location.href = '/pages/auth.html';
             return null;
         }
 
         const data = await response.json();
+        showUserControls();
         return data.user;
     } catch (error) {
         console.error('Auth check error:', error);
+
+        // Check if we're on discover page
+        const isDiscoverPage = window.location.pathname.includes('discover.html');
+        if (isDiscoverPage) {
+            hideUserControls();
+            return null;
+        }
+
         // On error, redirect to login for safety
         window.location.href = '/pages/auth.html';
         return null;
     }
+}
+
+// Show user controls (avatar, dropdown) and hide login button
+function showUserControls() {
+    const userWrapper = document.querySelector('.user-wrapper');
+    const loginBtn = document.getElementById('loginBtn');
+
+    if (userWrapper) userWrapper.style.display = 'flex';
+    if (loginBtn) loginBtn.style.display = 'none';
+}
+
+// Hide user controls and show login button
+function hideUserControls() {
+    const userWrapper = document.querySelector('.user-wrapper');
+    const loginBtn = document.getElementById('loginBtn');
+
+    if (userWrapper) userWrapper.style.display = 'none';
+    if (loginBtn) loginBtn.style.display = 'block';
 }
 
 // User avatar dropdown toggle

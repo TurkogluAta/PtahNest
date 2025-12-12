@@ -6,6 +6,25 @@ const PROJECTS_PER_PAGE = 4;
 let currentPage = 1;
 let isUserLoggedIn = false;
 
+// Check if user is logged in (async)
+async function checkUserAuth() {
+    try {
+        const response = await fetch('/api/auth/me', {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (response.ok) {
+            isUserLoggedIn = true;
+        } else {
+            isUserLoggedIn = false;
+        }
+    } catch (error) {
+        console.error('Auth check error:', error);
+        isUserLoggedIn = false;
+    }
+}
+
 // Filter state
 let selectedTags = new Set();
 let selectedRoles = new Set();
@@ -371,4 +390,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 // Initialize page
-fetchDiscoverProjects();
+(async function initPage() {
+    await checkUserAuth();
+    fetchDiscoverProjects();
+})();
