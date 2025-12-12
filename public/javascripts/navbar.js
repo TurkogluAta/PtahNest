@@ -51,6 +51,20 @@ function showUserControls() {
 
     if (userWrapper) userWrapper.style.display = 'flex';
     if (loginBtn) loginBtn.style.display = 'none';
+
+    // Show Dashboard and Projects links when logged in
+    const mainNav = document.getElementById('mainNav');
+    if (mainNav) {
+        const navLinks = mainNav.querySelectorAll('a[href="index.html"], a[href="projects.html"]');
+        navLinks.forEach(link => link.style.display = '');
+    }
+
+    // Show mobile menu Dashboard and Projects links
+    const mobileMenu = document.getElementById('mobileMenu');
+    if (mobileMenu) {
+        const mobileLinks = mobileMenu.querySelectorAll('a[href="index.html"], a[href="projects.html"]');
+        mobileLinks.forEach(link => link.style.display = '');
+    }
 }
 
 // Hide user controls and show login button
@@ -60,6 +74,20 @@ function hideUserControls() {
 
     if (userWrapper) userWrapper.style.display = 'none';
     if (loginBtn) loginBtn.style.display = 'block';
+
+    // Hide Dashboard and Projects links when not logged in
+    const mainNav = document.getElementById('mainNav');
+    if (mainNav) {
+        const navLinks = mainNav.querySelectorAll('a[href="index.html"], a[href="projects.html"]');
+        navLinks.forEach(link => link.style.display = 'none');
+    }
+
+    // Hide mobile menu Dashboard and Projects links
+    const mobileMenu = document.getElementById('mobileMenu');
+    if (mobileMenu) {
+        const mobileLinks = mobileMenu.querySelectorAll('a[href="index.html"], a[href="projects.html"]');
+        mobileLinks.forEach(link => link.style.display = 'none');
+    }
 }
 
 // User avatar dropdown toggle
