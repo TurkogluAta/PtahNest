@@ -16,6 +16,7 @@ var { validateSessionFingerprint } = require('./src/middleware/sessionSecurity')
 var { db, initDatabase } = require('./src/models/database');
 
 var authRouter = require('./src/routes/authRoutes');
+var projectRouter = require('./src/routes/projectRoutes');
 
 var app = express();
 
@@ -65,20 +66,36 @@ app.use(session({
 // Session security - validate fingerprint on every request
 app.use(validateSessionFingerprint);
 
-// Rate limiting for API routes
+// Rate limiting - Different limits for different endpoints
+// Auth endpoints: Stricter (prevent brute force, registration spam)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300, // 100 requests per 15 min (allows page refreshes + auth checks)
+  message: 'Too many authentication attempts, please try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Skip rate limiting for /me endpoint (auth checks)
+  skip: (req) => req.path === '/me'
+});
+
+// General API endpoints: More lenient (normal app usage)
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Max 100 requests per window
+  max: 1000, // 1000 requests per 15 min (~66 req/min, allows page refreshes & development)
   message: 'Too many requests, please try again later',
   standardHeaders: true,
   legacyHeaders: false
 });
 
-// Apply rate limiter to API routes
-app.use('/api/auth', apiLimiter);
+// Apply rate limiters
+app.use('/api/auth', authLimiter);
+app.use('/api/projects', apiLimiter);
 
 // Auth routes
 app.use('/api/auth', authRouter);
+
+// Project routes
+app.use('/api/projects', projectRouter);
 
 // Redirect root to appropriate page based on auth status
 app.get('/', (req, res) => {

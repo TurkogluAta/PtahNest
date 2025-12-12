@@ -57,7 +57,8 @@ body::after {
     align-items: center;
     justify-content: center;
     padding: 2rem;
-    overflow: hidden;
+    min-height: 100vh;
+    overflow-y: auto;
 }
 
 /* =========================================================
@@ -634,7 +635,7 @@ body::after {
 .text-muted {
     font-size: 1.1rem;
     color: var(--text-2);
-    margin-bottom: 2rem;
+    margin-bottom: 0.75rem;
 }
 
 /* =========================================================
@@ -855,8 +856,164 @@ body::after {
 /* =========================================================
    UTILITY CLASSES
    ========================================================= */
-.section-spaced {
-    margin-top: 3rem;
+/* Textarea styling for project descriptions */
+textarea.input-field {
+    resize: vertical;
+    min-height: 80px;
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+/* Tag button styles (for project creation form) */
+.tag-btn {
+    padding: 0.5rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-2);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+
+.tag-btn:hover {
+    background: var(--bg-elevated);
+    border-color: var(--primary);
+    color: var(--text-1);
+}
+
+.tag-btn.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+}
+
+/* Project tags display (in project cards) */
+.project-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.project-tag {
+    padding: 0.25rem 0.75rem;
+    background: rgba(102, 126, 234, 0.1);
+    border: 1px solid rgba(102, 126, 234, 0.3);
+    border-radius: 12px;
+    color: var(--primary-light);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+/* Looking for roles display */
+.project-looking-for {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+}
+
+.looking-for-label {
+    font-size: 0.8rem;
+    color: var(--text-3);
+    font-weight: 500;
+}
+
+.role-tag {
+    padding: 0.25rem 0.75rem;
+    background: rgba(63, 185, 80, 0.1);
+    border: 1px solid rgba(63, 185, 80, 0.3);
+    border-radius: 12px;
+    color: var(--success);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+/* Tab styles for projects page */
+.project-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 2rem;
+    border-bottom: 2px solid var(--border);
+}
+
+.tab-btn {
+    padding: 0.75rem 1.5rem;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-2);
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+    margin-bottom: -2px;
+}
+
+.tab-btn:hover {
+    color: var(--text-1);
+    border-bottom-color: var(--text-3);
+}
+
+.tab-btn.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+/* Tab content */
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* Pagination styles */
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 2rem;
+}
+
+.pagination-btn {
+    padding: 0.5rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-2);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+    min-width: 40px;
+}
+
+.pagination-btn:hover {
+    background: var(--bg-elevated);
+    border-color: var(--primary);
+    color: var(--text-1);
+}
+
+.pagination-btn.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+}
+
+.pagination-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .section-header {
@@ -876,6 +1033,93 @@ body::after {
 
 .no-margin {
     margin: 0 !important;
+}
+
+/* =========================================================
+   MODAL OVERLAY & DETAIL VIEW
+   ========================================================= */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(8px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    animation: fadeIn 0.3s ease;
+}
+
+.modal-content {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem;
+    max-width: 700px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    position: relative;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.modal-close {
+    position: absolute;
+    top: 1.5rem;
+    right: 1.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: var(--text-2);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.modal-close:hover {
+    background: var(--bg-base);
+    border-color: var(--primary);
+    color: var(--text-1);
+}
+
+/* Custom scrollbar for modal */
+.modal-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.modal-content::-webkit-scrollbar-track {
+    background: var(--surface);
+    border-radius: 4px;
+}
+
+.modal-content::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+}
+
+.modal-content::-webkit-scrollbar-thumb:hover {
+    background: var(--primary);
 }
 
 /* =========================================================
@@ -929,6 +1173,20 @@ body::after {
         font-size: 2rem;
     }
 
+    .modal-overlay {
+        padding: 1rem;
+    }
+
+    .modal-content {
+        padding: 1.5rem;
+        max-height: 95vh;
+    }
+
+    .modal-close {
+        top: 1rem;
+        right: 1rem;
+    }
+
     .stats-grid {
         grid-template-columns: repeat(3, 1fr);
         gap: 1rem;
@@ -969,5 +1227,184 @@ body::after {
 
 /* Auth page checkbox spacing */
 .checkbox-spaced {
+    margin-bottom: 1.5rem;
+}
+
+/* =========================================================
+   NOTIFICATION BADGE & JOIN REQUESTS
+   ========================================================= */
+/* Notification Badge */
+.notification-badge {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background: var(--primary);
+    color: white;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+/* Request Card */
+.request-card {
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 1rem;
+    background: var(--surface);
+}
+
+.request-card:last-child {
+    margin-bottom: 0;
+}
+
+.request-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+}
+
+.request-user {
+    font-weight: 600;
+    color: var(--text-1);
+    margin-bottom: 0.25rem;
+}
+
+.request-project {
+    font-size: 0.85rem;
+    color: var(--text-2);
+}
+
+.request-time {
+    font-size: 0.75rem;
+    color: var(--text-3);
+}
+
+.request-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+/* =========================================================
+   CTA BANNER (AUTH PAGE)
+   ========================================================= */
+.cta-banner {
+    max-width: 600px;
+    margin: 0 auto 2rem auto;
+    padding: 1.5rem 2rem;
+    background: linear-gradient(135deg, rgba(124, 58, 237, 0.15), rgba(139, 92, 246, 0.08));
+    border-radius: 16px;
+    border: 1px solid rgba(124, 58, 237, 0.3);
+    box-shadow: 0 8px 32px rgba(124, 58, 237, 0.1);
+}
+
+.cta-banner-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-1);
+    margin-bottom: 0.5rem;
+    text-align: center;
+}
+
+.cta-banner-text {
+    font-size: 1rem;
+    color: var(--text-2);
+    margin-bottom: 1.5rem;
+    text-align: center;
+    line-height: 1.6;
+}
+
+.cta-banner-highlight {
+    color: var(--primary);
+}
+
+.cta-banner-btn {
+    display: block;
+    text-decoration: none;
+    text-align: center;
+    padding: 1rem 2rem;
+    font-weight: 600;
+    font-size: 1rem;
+    box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+}
+
+/* =========================================================
+   FILTERS & MODALS
+   ========================================================= */
+.filter-section {
+    margin-bottom: 2rem;
+}
+
+.filter-buttons-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.modal-overlay-hidden {
+    display: none;
+}
+
+.modal-title {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+/* =========================================================
+   LAYOUT UTILITIES
+   ========================================================= */
+.section-header-flex {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.section-spacing-top {
+    margin-top: 2rem;
+}
+
+.section-heading {
+    margin-bottom: 1rem;
+}
+
+.back-button-container {
+    margin-bottom: 1rem;
+}
+
+.form-actions {
+    display: flex;
+    gap: 1rem;
+}
+
+.tag-buttons-wrapper {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.role-checkboxes-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+}
+
+/* =========================================================
+   STATE CLASSES (VISIBILITY TOGGLES)
+   ========================================================= */
+.join-requests-btn-hidden {
+    display: none;
+    position: relative;
+}
+
+.new-project-form-hidden {
+    display: none;
     margin-bottom: 1.5rem;
 }

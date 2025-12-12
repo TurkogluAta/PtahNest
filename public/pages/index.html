@@ -21,9 +21,9 @@
             <div class="header-right">
 
                 <nav class="main-nav" id="mainNav">
-                    <a href="#" class="nav-link active">Dashboard</a>
-                    <a href="#" class="nav-link">Projects</a>
-                    <a href="#" class="nav-link">Discover</a>
+                    <a href="index.html" class="nav-link active">Dashboard</a>
+                    <a href="projects.html" class="nav-link">Projects</a>
+                    <a href="discover.html" class="nav-link">Discover</a>
                 </nav>
 
                 <!-- USER AVATAR -->
@@ -48,9 +48,9 @@
 
         <!-- Mobile Menu -->
         <div class="mobile-menu" id="mobileMenu">
-            <a href="#" class="mobile-link">Dashboard</a>
-            <a href="#" class="mobile-link">Projects</a>
-            <a href="#" class="mobile-link">Discover</a>
+            <a href="index.html" class="mobile-link">Dashboard</a>
+            <a href="projects.html" class="mobile-link">Projects</a>
+            <a href="discover.html" class="mobile-link">Discover</a>
         </div>
     </header>
 
@@ -94,72 +94,12 @@
         <section class="section-spaced">
             <div class="section-header">
                 <h2>My Projects</h2>
-                <a href="#" class="text-link">View All →</a>
+                <a href="projects.html" class="text-link">View All →</a>
             </div>
 
-            <!-- PROJECT CARDS -->
-            <div class="card card-hover card-bottom-gap">
-                <div class="project-card-header">
-                    <div>
-                        <div class="card-title">AI-Powered Task Manager</div>
-                        <div class="card-desc no-margin">A smart task management system using AI.</div>
-                    </div>
-                    <span class="badge badge-success">Active</span>
-                </div>
-                <div class="project-meta">
-                    <span class="meta-inline">
-                        <img src="../pictures/icons/members.svg" width="16">
-                        5 Members
-                    </span>
-                </div>
-            </div>
-
-            <div class="card card-hover card-bottom-gap">
-                <div class="project-card-header">
-                    <div>
-                        <div class="card-title">Fitness Tracker App</div>
-                        <div class="card-desc no-margin">Mobile application to track workouts.</div>
-                    </div>
-                    <span class="badge badge-completed">Completed</span>
-                </div>
-                <div class="project-meta">
-                    <span class="meta-inline">
-                        <img src="../pictures/icons/members.svg" width="16">
-                        3 Members
-                    </span>
-                </div>
-            </div>
-
-            <div class="card card-hover card-bottom-gap">
-                <div class="project-card-header">
-                    <div>
-                        <div class="card-title">E-Commerce Platform</div>
-                        <div class="card-desc no-margin">Online marketplace with payment integration.</div>
-                    </div>
-                    <span class="badge badge-left">Left</span>
-                </div>
-                <div class="project-meta">
-                    <span class="meta-inline">
-                        <img src="../pictures/icons/members.svg" width="16">
-                        7 Members
-                    </span>
-                </div>
-            </div>
-
-            <div class="card card-hover card-bottom-gap">
-                <div class="project-card-header">
-                    <div>
-                        <div class="card-title">Social Media Dashboard</div>
-                        <div class="card-desc no-margin">Analytics dashboard for social platforms.</div>
-                    </div>
-                    <span class="badge badge-kicked">Kicked Out</span>
-                </div>
-                <div class="project-meta">
-                    <span class="meta-inline">
-                        <img src="../pictures/icons/members.svg" width="16">
-                        4 Members
-                    </span>
-                </div>
+            <!-- PROJECT CARDS (loaded dynamically) -->
+            <div id="myProjectsContainer">
+                <p class="text-muted">Loading projects...</p>
             </div>
 
         </section>
@@ -168,41 +108,18 @@
         <section class="section-spaced">
             <div class="section-header">
                 <h2>Discover</h2>
-                <a href="#" class="text-link">View All →</a>
+                <a href="discover.html" class="text-link">View All →</a>
             </div>
 
-            <div class="discover-grid">
-                <div class="card card-hover">
-                    <div class="card-title">Open Source CMS</div>
-                    <div class="card-desc">Modern CMS built with React and Node.</div>
-                    <div class="card-tags">
-                        <span class="tag">#React</span>
-                        <span class="tag">#Node</span>
-                    </div>
-                </div>
-
-                <div class="card card-hover">
-                    <div class="card-title">Climate Viz</div>
-                    <div class="card-desc">Interactive tool for climate data.</div>
-                    <div class="card-tags">
-                        <span class="tag">#Python</span>
-                        <span class="tag">#D3.js</span>
-                    </div>
-                </div>
-
-                <div class="card card-hover">
-                    <div class="card-title">Health AI</div>
-                    <div class="card-desc">AI analytics platform for hospitals.</div>
-                    <div class="card-tags">
-                        <span class="tag">#AI</span>
-                        <span class="tag">#ML</span>
-                    </div>
-                </div>
+            <!-- DISCOVER GRID (loaded dynamically) -->
+            <div class="discover-grid" id="discoverProjectsContainer">
+                <p class="text-muted">Loading projects...</p>
             </div>
 
 
         </section>
     </main>
+    <script src="../javascripts/navbar.js"></script>
     <script src="../javascripts/dashboard.js"></script>
 </body>
 

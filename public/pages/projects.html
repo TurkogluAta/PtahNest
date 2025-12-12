@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PtahNest - Projects</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../stylesheets/style.css">
+</head>
+
+<body>
+    <header class="app-header">
+        <div class="header-content">
+
+            <div class="header-left">
+                <div class="header-logo">PtahNest</div>
+            </div>
+
+            <div class="header-right">
+
+                <nav class="main-nav" id="mainNav">
+                    <a href="index.html" class="nav-link">Dashboard</a>
+                    <a href="projects.html" class="nav-link active">Projects</a>
+                    <a href="discover.html" class="nav-link">Discover</a>
+                </nav>
+
+                <!-- USER AVATAR -->
+                <div class="user-wrapper">
+                    <div class="user-avatar" id="userAvatar">
+                        <img src="../pictures/icons/user.svg" width="18" height="18" />
+                    </div>
+
+                    <div class="user-dropdown" id="userDropdown">
+                        <a class="dropdown-item" href="profile.html">Profile</a>
+                        <a class="dropdown-item" href="#">Logout</a>
+                    </div>
+                </div>
+
+                <!-- HAMBURGER -->
+                <button class="hamburger-btn" id="hamburgerBtn">
+                    <img src="../pictures/icons/hamburger.svg" width="24" height="24" />
+                </button>
+
+            </div>
+        </div>
+
+        <!-- Mobile Menu -->
+        <div class="mobile-menu" id="mobileMenu">
+            <a href="index.html" class="mobile-link">Dashboard</a>
+            <a href="projects.html" class="mobile-link">Projects</a>
+            <a href="discover.html" class="mobile-link">Discover</a>
+        </div>
+    </header>
+
+    <main class="layout-dashboard main-content">
+        <!-- HERO SECTION -->
+        <section>
+            <h1 class="hero-title">Projects</h1>
+            <p class="text-muted">Manage your collaborative projects</p>
+        </section>
+
+        <!-- PROJECTS SECTION WITH TABS -->
+        <section class="section-spaced">
+            <div class="section-header">
+                <div class="section-header-flex">
+                    <h2>My Projects</h2>
+                    <button class="btn btn-outline join-requests-btn-hidden" id="joinRequestsBtn">
+                        Join Requests
+                        <span class="notification-badge" id="requestsBadge">0</span>
+                    </button>
+                </div>
+                <button class="btn btn-primary" id="newProjectBtn">+ New Project</button>
+            </div>
+
+            <!-- Create Form (hidden by default) -->
+            <div class="card new-project-form-hidden" id="newProjectForm">
+                <h3 class="card-title">Create New Project</h3>
+
+                <form id="createProjectForm">
+                    <div class="input-group">
+                        <label class="input-label" for="projectName">Project Name</label>
+                        <input type="text" id="projectName" class="input-field"
+                               placeholder="Enter project name" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label" for="projectDescription">Description</label>
+                        <textarea id="projectDescription" class="input-field"
+                                  rows="3" placeholder="Brief project description"
+                                  required></textarea>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label">Tags</label>
+                        <div class="tag-buttons-wrapper">
+                            <button type="button" class="tag-btn" data-tag="Frontend">Frontend</button>
+                            <button type="button" class="tag-btn" data-tag="Backend">Backend</button>
+                            <button type="button" class="tag-btn" data-tag="Mobile">Mobile</button>
+                            <button type="button" class="tag-btn" data-tag="Design">Design</button>
+                            <button type="button" class="tag-btn" data-tag="AI/ML">AI/ML</button>
+                            <button type="button" class="tag-btn" data-tag="DevOps">DevOps</button>
+                        </div>
+                        <input type="text" id="customTags" class="input-field"
+                               placeholder="Add custom tags (comma separated)">
+                        <input type="hidden" id="selectedTags" value="">
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label">Looking For (Roles)</label>
+                        <div class="role-checkboxes-grid">
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="roleFrontend" class="checkbox" value="Frontend Developer">
+                                <label for="roleFrontend" class="checkbox-label">Frontend Developer</label>
+                            </div>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="roleBackend" class="checkbox" value="Backend Developer">
+                                <label for="roleBackend" class="checkbox-label">Backend Developer</label>
+                            </div>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="roleFullstack" class="checkbox" value="Fullstack Developer">
+                                <label for="roleFullstack" class="checkbox-label">Fullstack Developer</label>
+                            </div>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="roleDesigner" class="checkbox" value="UI/UX Designer">
+                                <label for="roleDesigner" class="checkbox-label">UI/UX Designer</label>
+                            </div>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="roleMobile" class="checkbox" value="Mobile Developer">
+                                <label for="roleMobile" class="checkbox-label">Mobile Developer</label>
+                            </div>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="roleDevOps" class="checkbox" value="DevOps Engineer">
+                                <label for="roleDevOps" class="checkbox-label">DevOps Engineer</label>
+                            </div>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="roleQA" class="checkbox" value="QA Tester">
+                                <label for="roleQA" class="checkbox-label">QA Tester</label>
+                            </div>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="rolePM" class="checkbox" value="Project Manager">
+                                <label for="rolePM" class="checkbox-label">Project Manager</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Create Project</button>
+                        <button type="button" class="btn btn-outline" id="cancelBtn">Cancel</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Tab Navigation -->
+            <div class="project-tabs">
+                <button class="tab-btn active" data-tab="active" id="activeTab">Active</button>
+                <button class="tab-btn" data-tab="past" id="pastTab">Past</button>
+            </div>
+
+            <!-- Tab Content -->
+            <div class="tab-content active" id="activeContent">
+                <div id="activeProjectsContainer">
+                    <!-- Dynamically populated by JS -->
+                </div>
+            </div>
+
+            <div class="tab-content" id="pastContent">
+                <div id="pastProjectsContainer">
+                    <!-- Dynamically populated by JS -->
+                </div>
+            </div>
+
+            <!-- Single Pagination (shared by both tabs) -->
+            <div class="pagination" id="projectPagination">
+                <!-- Pagination buttons -->
+            </div>
+        </section>
+    </main>
+
+    <!-- JOIN REQUESTS MODAL -->
+    <div class="modal-overlay modal-overlay-hidden" id="requestsModal">
+        <div class="modal-content">
+            <button class="modal-close" id="closeRequestsModal">&times;</button>
+            <div class="card-title modal-title">
+                Join Requests
+            </div>
+            <div id="requestsContainer">
+                <!-- Dynamically populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <script src="../javascripts/navbar.js"></script>
+    <script src="../javascripts/projects.js"></script>
+
+</body>
+
+</html>

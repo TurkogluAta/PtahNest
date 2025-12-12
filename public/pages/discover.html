@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PtahNest - Discover Projects</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../stylesheets/style.css">
+</head>
+
+<body>
+    <header class="app-header">
+        <div class="header-content">
+
+            <div class="header-left">
+                <div class="header-logo">PtahNest</div>
+            </div>
+
+            <div class="header-right">
+
+                <nav class="main-nav" id="mainNav">
+                    <a href="index.html" class="nav-link">Dashboard</a>
+                    <a href="projects.html" class="nav-link">Projects</a>
+                    <a href="discover.html" class="nav-link active">Discover</a>
+                </nav>
+
+                <!-- USER AVATAR -->
+                <div class="user-wrapper">
+                    <div class="user-avatar" id="userAvatar">
+                        <img src="../pictures/icons/user.svg" width="18" height="18" />
+                    </div>
+
+                    <div class="user-dropdown" id="userDropdown">
+                        <a class="dropdown-item" href="profile.html">Profile</a>
+                        <a class="dropdown-item" href="#">Logout</a>
+                    </div>
+                </div>
+
+                <!-- HAMBURGER -->
+                <button class="hamburger-btn" id="hamburgerBtn">
+                    <img src="../pictures/icons/hamburger.svg" width="24" height="24" />
+                </button>
+
+            </div>
+        </div>
+
+        <!-- Mobile Menu -->
+        <div class="mobile-menu" id="mobileMenu">
+            <a href="index.html" class="mobile-link">Dashboard</a>
+            <a href="projects.html" class="mobile-link">Projects</a>
+            <a href="discover.html" class="mobile-link">Discover</a>
+        </div>
+    </header>
+
+    <main class="layout-dashboard main-content">
+        <!-- HERO SECTION -->
+        <section>
+            <h1 class="hero-title">Discover Projects</h1>
+            <p class="text-muted">Find open source projects looking for contributors</p>
+        </section>
+
+        <!-- FILTER/SEARCH SECTION -->
+        <section class="section-spaced">
+            <div class="card filter-section">
+                <!-- Search Bar -->
+                <div class="input-group">
+                    <input type="text" id="searchInput" class="input-field"
+                           placeholder="Search projects by name or description...">
+                </div>
+
+                <!-- Tag Filters -->
+                <div class="input-group">
+                    <label class="input-label">Filter by Tags</label>
+                    <div class="filter-buttons-group">
+                        <button type="button" class="tag-btn filter-tag" data-filter-tag="Frontend">Frontend</button>
+                        <button type="button" class="tag-btn filter-tag" data-filter-tag="Backend">Backend</button>
+                        <button type="button" class="tag-btn filter-tag" data-filter-tag="Mobile">Mobile</button>
+                        <button type="button" class="tag-btn filter-tag" data-filter-tag="Design">Design</button>
+                        <button type="button" class="tag-btn filter-tag" data-filter-tag="AI/ML">AI/ML</button>
+                        <button type="button" class="tag-btn filter-tag" data-filter-tag="DevOps">DevOps</button>
+                    </div>
+                </div>
+
+                <!-- Role Filters -->
+                <div class="input-group">
+                    <label class="input-label">Filter by Roles Looking For</label>
+                    <div class="filter-buttons-group">
+                        <button type="button" class="tag-btn filter-role" data-filter-role="Frontend Developer">Frontend Dev</button>
+                        <button type="button" class="tag-btn filter-role" data-filter-role="Backend Developer">Backend Dev</button>
+                        <button type="button" class="tag-btn filter-role" data-filter-role="Fullstack Developer">Fullstack Dev</button>
+                        <button type="button" class="tag-btn filter-role" data-filter-role="UI/UX Designer">Designer</button>
+                        <button type="button" class="tag-btn filter-role" data-filter-role="Mobile Developer">Mobile Dev</button>
+                        <button type="button" class="tag-btn filter-role" data-filter-role="DevOps Engineer">DevOps</button>
+                        <button type="button" class="tag-btn filter-role" data-filter-role="QA Tester">QA</button>
+                        <button type="button" class="tag-btn filter-role" data-filter-role="Project Manager">PM</button>
+                    </div>
+                </div>
+
+                <!-- Clear Filters Button -->
+                <button type="button" class="btn btn-outline" id="clearFilters">Clear All Filters</button>
+            </div>
+        </section>
+
+        <!-- PROJECTS GRID SECTION -->
+        <section class="section-spaced">
+            <div class="section-header">
+                <h2>Available Projects</h2>
+                <span class="text-muted" id="projectCount">0 projects</span>
+            </div>
+
+            <div class="discover-grid" id="projectsGrid">
+                <!-- Dynamically populated by JS -->
+            </div>
+
+            <!-- Pagination -->
+            <div class="pagination" id="discoverPagination"></div>
+        </section>
+    </main>
+
+    <!-- PROJECT DETAIL MODAL -->
+    <div class="modal-overlay modal-overlay-hidden" id="projectModal">
+        <div class="modal-content">
+            <button class="modal-close" id="closeModal">&times;</button>
+            <div id="modalBody">
+                <!-- Dynamically populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <script src="../javascripts/navbar.js"></script>
+    <script src="../javascripts/discover.js"></script>
+
+</body>
+
+</html>

@@ -78,7 +78,14 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
             body: JSON.stringify({ identifier, password, remember })
         });
 
-        const data = await response.json();
+        // Read response as text first, then try to parse as JSON
+        const text = await response.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (parseError) {
+            data = { message: text || 'An error occurred' };
+        }
 
         if (response.ok) {
             showMessage('Login successful! Redirecting...', 'success');
@@ -134,7 +141,14 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
             body: JSON.stringify({ username, email, password })
         });
 
-        const data = await response.json();
+        // Read response as text first, then try to parse as JSON
+        const text = await response.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (parseError) {
+            data = { message: text || 'An error occurred' };
+        }
 
         if (response.ok) {
             showMessage('Account created! Redirecting...', 'success');
