@@ -7,7 +7,7 @@ const { setSessionFingerprint } = require('../middleware/sessionSecurity');
 // REGISTER endpoint
 router.post('/register', async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { username, email, password, deviceId, deviceFingerprint } = req.body;
 
     // Basic validation
     if (!username || !email || !password) {
@@ -41,8 +41,8 @@ router.post('/register', async (req, res) => {
       // Create session (auto-login after registration)
       req.session.userId = user.id;
 
-      // Set session fingerprint (IP + User-Agent)
-      setSessionFingerprint(req);
+      // Set session fingerprint (Device ID + fingerprint)
+      setSessionFingerprint(req, { deviceId, deviceFingerprint });
 
       res.status(201).json({
         success: true,
@@ -63,7 +63,7 @@ router.post('/register', async (req, res) => {
 // LOGIN endpoint
 router.post('/login', async (req, res) => {
   try {
-    const { identifier, password, remember } = req.body;
+    const { identifier, password, remember, deviceId, deviceFingerprint } = req.body;
 
     // Basic validation
     if (!identifier || !password) {
@@ -114,8 +114,8 @@ router.post('/login', async (req, res) => {
       // Create session
       req.session.userId = user.id;
 
-      // Set session fingerprint (IP + User-Agent)
-      setSessionFingerprint(req);
+      // Set session fingerprint (Device ID + fingerprint)
+      setSessionFingerprint(req, { deviceId, deviceFingerprint });
 
       // Remember me functionality
       if (remember) {

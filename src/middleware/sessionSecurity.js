@@ -1,25 +1,27 @@
 // Session Security Middleware
-// IP + User-Agent fingerprinting to prevent session hijacking
+// Device ID + User-Agent fingerprinting to prevent session hijacking
+// (IP-based check removed to avoid VPN/mobile network logout issues)
 
 /**
- * Creates a session fingerprint from request data
- * Fingerprint includes IP address and User-Agent
- * Used to detect session hijacking attempts
+ * Saves device fingerprint into session during login/register.
+ * deviceInfo comes from the client (localStorage UUID + basic fingerprint).
  */
-function createFingerprint(req) {
-  const ip = req.ip || req.connection.remoteAddress;
+function setSessionFingerprint(req, deviceInfo = {}) {
   const userAgent = req.headers['user-agent'] || 'unknown';
 
-  return {
-    ip,
-    userAgent
+  req.session.fingerprint = {
+    deviceId: deviceInfo.deviceId || 'unknown',
+    userAgent,
+    screenResolution: deviceInfo.deviceFingerprint?.screenResolution || 'unknown',
+    timezone: deviceInfo.deviceFingerprint?.timezone || 'unknown'
   };
 }
 
 /**
- * Validates session fingerprint on each request
- * Compares current IP and User-Agent with stored values
- * If mismatch detected, destroys session (possible hijacking)
+ * Validates session fingerprint on each request.
+ * Compares current User-Agent with the stored value.
+ * Device ID is already bound to the session at login time,
+ * so subsequent requests only need User-Agent consistency check.
  */
 function validateSessionFingerprint(req, res, next) {
   // Skip validation for non-authenticated users
@@ -42,32 +44,25 @@ function validateSessionFingerprint(req, res, next) {
     });
   }
 
-  const currentFingerprint = createFingerprint(req);
+  const currentUserAgent = req.headers['user-agent'] || 'unknown';
   const storedFingerprint = req.session.fingerprint;
 
-  // Detect fingerprint mismatch
-  const ipChanged = currentFingerprint.ip !== storedFingerprint.ip;
-  const userAgentChanged = currentFingerprint.userAgent !== storedFingerprint.userAgent;
-
-  if (ipChanged || userAgentChanged) {
+  // Check if User-Agent changed (possible session theft)
+  if (currentUserAgent !== storedFingerprint.userAgent) {
     console.warn('Session hijacking attempt detected:', {
       userId: req.session.userId,
-      storedIp: storedFingerprint.ip,
-      currentIp: currentFingerprint.ip,
+      storedDeviceId: storedFingerprint.deviceId,
       storedUserAgent: storedFingerprint.userAgent.substring(0, 50),
-      currentUserAgent: currentFingerprint.userAgent.substring(0, 50),
-      ipChanged,
-      userAgentChanged
+      currentUserAgent: currentUserAgent.substring(0, 50)
     });
 
-    // Destroy session immediately for security
+    // Destroy session immediately
     req.session.destroy((err) => {
       if (err) {
         console.error('Error destroying hijacked session:', err);
       }
     });
 
-    // Reject request with 401 Unauthorized
     return res.status(401).json({
       success: false,
       message: 'Session security validation failed. Please login again.',
@@ -79,15 +74,7 @@ function validateSessionFingerprint(req, res, next) {
   next();
 }
 
-/**
- * Helper to set session fingerprint during login/register
- */
-function setSessionFingerprint(req) {
-  req.session.fingerprint = createFingerprint(req);
-}
-
 module.exports = {
   validateSessionFingerprint,
-  setSessionFingerprint,
-  createFingerprint
+  setSessionFingerprint
 };

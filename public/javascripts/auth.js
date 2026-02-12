@@ -1,3 +1,22 @@
+// Generate or retrieve device UUID from localStorage
+function getOrCreateDeviceId() {
+    let deviceId = localStorage.getItem('ptahnest_device_id');
+    if (!deviceId) {
+        deviceId = crypto.randomUUID();
+        localStorage.setItem('ptahnest_device_id', deviceId);
+    }
+    return deviceId;
+}
+
+// Collect basic device fingerprint (privacy-friendly)
+function getDeviceFingerprint() {
+    return {
+        userAgent: navigator.userAgent,
+        screenResolution: `${screen.width}x${screen.height}`,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    };
+}
+
 // DOM elements
 const forms = document.querySelectorAll('.form');
 const messageDiv = document.getElementById('message');
@@ -75,7 +94,11 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ identifier, password, remember })
+            body: JSON.stringify({
+                identifier, password, remember,
+                deviceId: getOrCreateDeviceId(),
+                deviceFingerprint: getDeviceFingerprint()
+            })
         });
 
         // Read response as text first, then try to parse as JSON
@@ -138,7 +161,11 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ username, email, password })
+            body: JSON.stringify({
+                username, email, password,
+                deviceId: getOrCreateDeviceId(),
+                deviceFingerprint: getDeviceFingerprint()
+            })
         });
 
         // Read response as text first, then try to parse as JSON
