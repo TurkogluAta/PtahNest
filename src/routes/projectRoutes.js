@@ -1,6 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { projectDb, userDb, memberDb, joinRequestDb } = require('../models/database');
+const {
+  createProjectValidation,
+  updateProjectValidation,
+  joinRequestValidation,
+  manageRequestValidation,
+  paramIdValidation,
+  paramRequestIdValidation
+} = require('../middleware/validators');
 
 // Middleware: Check if user is authenticated
 function requireAuth(req, res, next) {
@@ -14,24 +22,9 @@ function requireAuth(req, res, next) {
 }
 
 // CREATE: New project
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, createProjectValidation, async (req, res) => {
   try {
     const { name, description, tags, lookingFor } = req.body;
-
-    // Validation
-    if (!name || !description) {
-      return res.status(400).json({
-        success: false,
-        message: 'Name and description are required'
-      });
-    }
-
-    if (!Array.isArray(tags) || !Array.isArray(lookingFor)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Tags and lookingFor must be arrays'
-      });
-    }
 
     // Auto-set recruitment status
     const recruitmentOpen = lookingFor.length > 0;
@@ -103,7 +96,7 @@ router.get('/discover', async (req, res) => {
 });
 
 // READ: Get single project by ID
-router.get('/:id', async (req, res) => {
+router.get('/:id', paramIdValidation, async (req, res) => {
   try {
     const project = projectDb.findById(req.params.id);
 
@@ -133,17 +126,9 @@ router.get('/:id', async (req, res) => {
 });
 
 // UPDATE: Update project
-router.put('/:id', requireAuth, async (req, res) => {
+router.put('/:id', requireAuth, paramIdValidation, updateProjectValidation, async (req, res) => {
   try {
     const { name, description, tags, lookingFor, recruitmentOpen } = req.body;
-
-    // Validation
-    if (!name || !description) {
-      return res.status(400).json({
-        success: false,
-        message: 'Name and description are required'
-      });
-    }
 
     // Update project (ownership check in projectDb.update)
     const success = projectDb.update(req.params.id, req.session.userId, {
@@ -176,7 +161,7 @@ router.put('/:id', requireAuth, async (req, res) => {
 });
 
 // PATCH: Toggle recruitment status
-router.patch('/:id/recruitment', requireAuth, async (req, res) => {
+router.patch('/:id/recruitment', requireAuth, paramIdValidation, async (req, res) => {
   try {
     const success = projectDb.toggleRecruitment(req.params.id, req.session.userId);
 
@@ -205,7 +190,7 @@ router.patch('/:id/recruitment', requireAuth, async (req, res) => {
 });
 
 // DELETE: Delete project
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', requireAuth, paramIdValidation, async (req, res) => {
   try {
     const success = projectDb.delete(req.params.id, req.session.userId);
 
@@ -231,7 +216,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
 });
 
 // JOIN REQUEST: Send join request to project
-router.post('/:id/join', requireAuth, async (req, res) => {
+router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, async (req, res) => {
   try {
     const projectId = req.params.id;
     const userId = req.session.userId;
@@ -323,7 +308,7 @@ router.post('/:id/join', requireAuth, async (req, res) => {
 });
 
 // GET: Get all join requests for a project (creator only)
-router.get('/:id/requests', requireAuth, async (req, res) => {
+router.get('/:id/requests', requireAuth, paramIdValidation, async (req, res) => {
   try {
     const projectId = req.params.id;
     const userId = req.session.userId;
@@ -362,7 +347,7 @@ router.get('/:id/requests', requireAuth, async (req, res) => {
 });
 
 // PATCH: Accept/reject join request
-router.patch('/:id/requests/:requestId', requireAuth, async (req, res) => {
+router.patch('/:id/requests/:requestId', requireAuth, paramIdValidation, paramRequestIdValidation, manageRequestValidation, async (req, res) => {
   try {
     const projectId = req.params.id;
     const requestId = req.params.requestId;
@@ -438,7 +423,7 @@ router.patch('/:id/requests/:requestId', requireAuth, async (req, res) => {
 });
 
 // GET: Get all members of a project
-router.get('/:id/members', requireAuth, async (req, res) => {
+router.get('/:id/members', requireAuth, paramIdValidation, async (req, res) => {
   try {
     const projectId = req.params.id;
     const userId = req.session.userId;
@@ -478,7 +463,7 @@ router.get('/:id/members', requireAuth, async (req, res) => {
 });
 
 // DELETE: Leave project (member self-removal)
-router.delete('/:id/leave', requireAuth, async (req, res) => {
+router.delete('/:id/leave', requireAuth, paramIdValidation, async (req, res) => {
   try {
     const projectId = req.params.id;
     const userId = req.session.userId;

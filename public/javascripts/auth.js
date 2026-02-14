@@ -138,13 +138,48 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
         return;
     }
 
+    // Username validation (alphanumeric + underscore, 3-30 chars)
+    if (username.length < 3 || username.length > 30) {
+        showMessage('Username must be between 3 and 30 characters', 'error');
+        return;
+    }
+
+    const usernameRegex = /^[a-zA-Z0-9_]+$/;
+    if (!usernameRegex.test(username)) {
+        showMessage('Username can only contain letters, numbers, and underscores', 'error');
+        return;
+    }
+
+    // Email validation (simple regex)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        showMessage('Please provide a valid email address', 'error');
+        return;
+    }
+
     if (password !== confirm) {
         showMessage('Passwords do not match', 'error');
         return;
     }
 
+    // Password strength check (uppercase, number, special char)
     if (password.length < 8) {
         showMessage('Password must be at least 8 characters', 'error');
+        return;
+    }
+
+    if (!/[A-Z]/.test(password)) {
+        showMessage('Password must contain at least one uppercase letter', 'error');
+        return;
+    }
+
+    if (!/[0-9]/.test(password)) {
+        showMessage('Password must contain at least one number', 'error');
+        return;
+    }
+
+    if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+        showMessage('Password must contain at least one special character', 'error');
         return;
     }
 

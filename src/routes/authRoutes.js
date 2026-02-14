@@ -3,19 +3,12 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const { userDb, loginAttemptDb } = require('../models/database');
 const { setSessionFingerprint } = require('../middleware/sessionSecurity');
+const { registerValidation, loginValidation } = require('../middleware/validators');
 
 // REGISTER endpoint
-router.post('/register', async (req, res) => {
+router.post('/register', registerValidation, async (req, res) => {
   try {
     const { username, email, password, deviceId, deviceFingerprint } = req.body;
-
-    // Basic validation
-    if (!username || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'All fields are required'
-      });
-    }
 
     // Check if email or username already exists (case-insensitive)
     const existing = userDb.findByEmailOrUsername(email) || userDb.findByEmailOrUsername(username);
@@ -61,17 +54,9 @@ router.post('/register', async (req, res) => {
 });
 
 // LOGIN endpoint
-router.post('/login', async (req, res) => {
+router.post('/login', loginValidation, async (req, res) => {
   try {
     const { identifier, password, remember, deviceId, deviceFingerprint } = req.body;
-
-    // Basic validation
-    if (!identifier || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email/username and password are required'
-      });
-    }
 
     // Brute-force protection check (IP-based)
     const clientIp = req.ip || req.connection.remoteAddress;
