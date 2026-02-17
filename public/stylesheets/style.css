@@ -856,6 +856,117 @@ body::after {
 /* =========================================================
    UTILITY CLASSES
    ========================================================= */
+/* Repo slide box */
+.repo-slidebox {
+    position: relative;
+}
+
+.repo-slidebox-trigger {
+    width: 100%;
+    padding: .875rem 1rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text-1);
+    font-family: inherit;
+    font-size: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.repo-slidebox-trigger:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--text-3);
+}
+
+.repo-slidebox-trigger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.repo-slidebox-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.repo-slidebox-arrow {
+    flex-shrink: 0;
+    margin-left: 0.5rem;
+    color: var(--text-2);
+    transition: transform 0.3s;
+}
+
+.repo-slidebox.open .repo-slidebox-arrow {
+    transform: rotate(180deg);
+}
+
+.repo-slidebox.open .repo-slidebox-trigger {
+    border-color: var(--primary-light);
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.repo-slidebox-panel {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+    border: 1px solid transparent;
+    border-top: none;
+    border-radius: 0 0 12px 12px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.repo-slidebox.open .repo-slidebox-panel {
+    max-height: 240px;
+    border-color: var(--primary-light);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.repo-slidebox-list {
+    overflow-y: auto;
+    max-height: 240px;
+}
+
+.repo-slidebox-item {
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    transition: background 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-1);
+    border-bottom: 1px solid var(--border);
+}
+
+.repo-slidebox-item:last-child {
+    border-bottom: none;
+}
+
+.repo-slidebox-item:hover {
+    background: rgba(102, 126, 234, 0.1);
+}
+
+.repo-slidebox-item.selected {
+    background: rgba(102, 126, 234, 0.15);
+    color: var(--primary-light);
+}
+
+.repo-slidebox-item .repo-private-badge {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-2);
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
 /* Textarea styling for project descriptions */
 textarea.input-field {
     resize: vertical;
