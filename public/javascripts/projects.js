@@ -244,18 +244,22 @@ document.getElementById('createProjectForm').addEventListener('submit', async (e
     const roleCheckboxes = document.querySelectorAll('input[type="checkbox"].checkbox:checked');
     const lookingFor = Array.from(roleCheckboxes).map(cb => cb.value);
 
+    // Get selected GitHub repo (empty string = null)
+    const githubRepo = document.getElementById('githubRepo').value || null;
+
     try {
         const response = await fetch('/api/projects', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, description, tags, lookingFor })
+            body: JSON.stringify({ name, description, tags, lookingFor, githubRepo })
         });
 
-        if (!response.ok) {
-            throw new Error('Failed to create project');
-        }
-
         const data = await response.json();
+
+        if (!response.ok) {
+            alert(data.message || 'Failed to create project');
+            return;
+        }
 
         // Add new project to beginning
         projects.unshift(data.project);
@@ -271,6 +275,13 @@ document.getElementById('createProjectForm').addEventListener('submit', async (e
         selectedTagsSet.clear();
         tagButtons.forEach(btn => btn.classList.remove('active'));
         document.getElementById('selectedTags').value = '';
+        // Reset repo slide box
+        document.getElementById('githubRepo').value = '';
+        document.getElementById('repoSelectedText').textContent = 'No repository';
+        document.querySelectorAll('.repo-slidebox-item').forEach(item => {
+            item.classList.toggle('selected', item.dataset.repo === '');
+        });
+        document.getElementById('repoSlidebox').classList.remove('open');
         newProjectForm.style.display = 'none';
 
         console.log('Project created:', data.project);
@@ -480,5 +491,124 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+// ========================================
+// GITHUB REPO SLIDE BOX
+// ========================================
+let repoList = []; // Store fetched repos
+
+// Render repo list filtered by search query
+function renderRepoList(filter = '') {
+    const listEl = document.getElementById('repoList');
+    const selectedRepo = document.getElementById('githubRepo').value;
+    const query = filter.toLowerCase();
+
+    // Filter repos by search query
+    const filtered = repoList.filter(repo =>
+        repo.full_name.toLowerCase().includes(query)
+    );
+
+    // Always show "No repository" option (unless searching)
+    let html = '';
+    if (!query) {
+        html += `<div class="repo-slidebox-item${selectedRepo === '' ? ' selected' : ''}" data-repo="" onclick="selectRepo('')">No repository</div>`;
+    }
+
+    if (filtered.length === 0 && query) {
+        html += '<div class="repo-no-results">No matching repositories</div>';
+    } else {
+        filtered.forEach(repo => {
+            const isSelected = selectedRepo === repo.full_name;
+            const privateBadge = repo.private ? '<span class="repo-private-badge">Private</span>' : '';
+            html += `<div class="repo-slidebox-item${isSelected ? ' selected' : ''}" data-repo="${repo.full_name}" onclick="selectRepo('${repo.full_name}')">${repo.full_name}${privateBadge}</div>`;
+        });
+    }
+
+    listEl.innerHTML = html;
+}
+
+// Toggle slide box open/close
+function toggleRepoSlidebox() {
+    const box = document.getElementById('repoSlidebox');
+    const searchInput = document.getElementById('repoSearchInput');
+    const isOpen = box.classList.toggle('open');
+
+    if (isOpen) {
+        searchInput.value = '';
+        renderRepoList();
+        setTimeout(() => searchInput.focus(), 50);
+    }
+}
+
+// Select a repo from the slide box
+function selectRepo(fullName) {
+    document.getElementById('githubRepo').value = fullName;
+    document.getElementById('repoSelectedText').textContent = fullName || 'No repository';
+    document.getElementById('repoSlidebox').classList.remove('open');
+    document.getElementById('repoSearchInput').value = '';
+    renderRepoList();
+}
+
+// Close slide box when clicking outside
+document.addEventListener('click', (e) => {
+    const box = document.getElementById('repoSlidebox');
+    if (box && !box.contains(e.target)) {
+        box.classList.remove('open');
+    }
+});
+
+// Prevent panel clicks from toggling the slidebox
+document.getElementById('repoPanel').addEventListener('click', (e) => {
+    e.stopPropagation();
+});
+
+// Search input handler
+document.getElementById('repoSearchInput').addEventListener('input', (e) => {
+    renderRepoList(e.target.value);
+});
+
+// Load GitHub repos into slide box
+async function loadGithubRepos() {
+    const trigger = document.getElementById('repoTrigger');
+    const hint = document.getElementById('githubRepoHint');
+
+    try {
+        // Check if GitHub is linked
+        const statusRes = await fetch('/api/github/status');
+        const statusData = await statusRes.json();
+
+        if (!statusData.linked) {
+            trigger.disabled = true;
+            hint.textContent = 'Link your GitHub account in Profile to select a repository.';
+            hint.style.display = 'block';
+            return;
+        }
+
+        // Fetch repos
+        const reposRes = await fetch('/api/github/repos');
+        const reposData = await reposRes.json();
+
+        if (!reposData.success || reposData.repos.length === 0) {
+            trigger.disabled = true;
+            hint.textContent = 'No repositories found on your GitHub account.';
+            hint.style.display = 'block';
+            return;
+        }
+
+        repoList = reposData.repos;
+        trigger.disabled = false;
+        hint.style.display = 'none';
+        renderRepoList();
+
+        // Attach trigger click
+        trigger.addEventListener('click', toggleRepoSlidebox);
+
+    } catch (error) {
+        console.error('Load GitHub repos error:', error);
+        hint.textContent = 'Failed to load repositories.';
+        hint.style.display = 'block';
+    }
+}
+
 // Fetch projects on page load
 fetchProjects();
+loadGithubRepos();

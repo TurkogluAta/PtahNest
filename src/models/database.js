@@ -92,6 +92,12 @@ function initDatabase() {
     db.exec('ALTER TABLE users ADD COLUMN github_token TEXT');
   }
 
+  // Migration: add github_repo column to projects table
+  const projectColumns = db.pragma('table_info(projects)').map(c => c.name);
+  if (!projectColumns.includes('github_repo')) {
+    db.exec('ALTER TABLE projects ADD COLUMN github_repo TEXT');
+  }
+
   console.log('Database initialized');
 }
 
@@ -206,14 +212,14 @@ const loginAttemptDb = {
 // Project database operations
 const projectDb = {
   // CREATE
-  create(name, description, creatorId, tags, lookingFor, recruitmentOpen) {
+  create(name, description, creatorId, tags, lookingFor, recruitmentOpen, githubRepo = null) {
     const id = require('crypto').randomUUID();
     const memberId = require('crypto').randomUUID();
 
     // Insert project
     const stmt = db.prepare(`
-      INSERT INTO projects (id, name, description, project_status, creator_id, tags, looking_for, recruitment_open)
-      VALUES (?, ?, ?, 'active', ?, ?, ?, ?)
+      INSERT INTO projects (id, name, description, project_status, creator_id, tags, looking_for, recruitment_open, github_repo)
+      VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)
     `);
     stmt.run(
       id,
@@ -222,7 +228,8 @@ const projectDb = {
       creatorId,
       JSON.stringify(tags),
       JSON.stringify(lookingFor),
-      recruitmentOpen ? 1 : 0
+      recruitmentOpen ? 1 : 0,
+      githubRepo
     );
 
     // Add creator as member with role 'creator'
@@ -233,6 +240,17 @@ const projectDb = {
     memberStmt.run(memberId, id, creatorId);
 
     return { id, name, description, project_status: 'active', tags, lookingFor, recruitmentOpen };
+  },
+
+  // Check if a GitHub repo is already used by an active project
+  isRepoInUse(repoFullName, excludeProjectId = null) {
+    let stmt;
+    if (excludeProjectId) {
+      stmt = db.prepare('SELECT id FROM projects WHERE github_repo = ? AND project_status = ? AND id != ?');
+      return stmt.get(repoFullName, 'active', excludeProjectId) !== undefined;
+    }
+    stmt = db.prepare('SELECT id FROM projects WHERE github_repo = ? AND project_status = ?');
+    return stmt.get(repoFullName, 'active') !== undefined;
   },
 
   // READ: Get all user's projects (creator + member) - FOR PROJECTS PAGE
@@ -336,10 +354,10 @@ const projectDb = {
   },
 
   // UPDATE: Update project
-  update(id, creatorId, { name, description, tags, lookingFor, recruitmentOpen }) {
+  update(id, creatorId, { name, description, tags, lookingFor, recruitmentOpen, githubRepo = null }) {
     const stmt = db.prepare(`
       UPDATE projects
-      SET name = ?, description = ?, tags = ?, looking_for = ?, recruitment_open = ?, updated_at = CURRENT_TIMESTAMP
+      SET name = ?, description = ?, tags = ?, looking_for = ?, recruitment_open = ?, github_repo = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND creator_id = ?
     `);
     const result = stmt.run(
@@ -348,6 +366,7 @@ const projectDb = {
       JSON.stringify(tags),
       JSON.stringify(lookingFor),
       recruitmentOpen ? 1 : 0,
+      githubRepo,
       id,
       creatorId
     );

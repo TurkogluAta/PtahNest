@@ -24,7 +24,16 @@ function requireAuth(req, res, next) {
 // CREATE: New project
 router.post('/', requireAuth, createProjectValidation, async (req, res) => {
   try {
-    const { name, description, tags, lookingFor } = req.body;
+    const { name, description, tags, lookingFor, githubRepo } = req.body;
+    const repoValue = githubRepo || null;
+
+    // Check if repo is already used by another active project
+    if (repoValue && projectDb.isRepoInUse(repoValue)) {
+      return res.status(400).json({
+        success: false,
+        message: 'This GitHub repository is already linked to another active project'
+      });
+    }
 
     // Auto-set recruitment status
     const recruitmentOpen = lookingFor.length > 0;
@@ -36,7 +45,8 @@ router.post('/', requireAuth, createProjectValidation, async (req, res) => {
       req.session.userId,
       tags,
       lookingFor,
-      recruitmentOpen
+      recruitmentOpen,
+      repoValue
     );
 
     res.status(201).json({
@@ -128,7 +138,16 @@ router.get('/:id', paramIdValidation, async (req, res) => {
 // UPDATE: Update project
 router.put('/:id', requireAuth, paramIdValidation, updateProjectValidation, async (req, res) => {
   try {
-    const { name, description, tags, lookingFor, recruitmentOpen } = req.body;
+    const { name, description, tags, lookingFor, recruitmentOpen, githubRepo } = req.body;
+    const repoValue = githubRepo || null;
+
+    // Check if repo is already used by another active project (exclude current project)
+    if (repoValue && projectDb.isRepoInUse(repoValue, req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'This GitHub repository is already linked to another active project'
+      });
+    }
 
     // Update project (ownership check in projectDb.update)
     const success = projectDb.update(req.params.id, req.session.userId, {
@@ -136,7 +155,8 @@ router.put('/:id', requireAuth, paramIdValidation, updateProjectValidation, asyn
       description,
       tags,
       lookingFor,
-      recruitmentOpen
+      recruitmentOpen,
+      githubRepo: repoValue
     });
 
     if (!success) {

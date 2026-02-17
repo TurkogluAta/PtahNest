@@ -92,6 +92,29 @@
                                   required></textarea>
                     </div>
 
+                    <div class="input-group" id="githubRepoGroup">
+                        <label class="input-label">GitHub Repository (Optional)</label>
+                        <div class="repo-slidebox" id="repoSlidebox">
+                            <button type="button" class="repo-slidebox-trigger" id="repoTrigger" disabled>
+                                <span class="repo-slidebox-text" id="repoSelectedText">No repository</span>
+                                <svg class="repo-slidebox-arrow" width="12" height="8" viewBox="0 0 12 8">
+                                    <path fill="currentColor" d="M1.41 0L6 4.58 10.59 0 12 1.41l-6 6-6-6z"/>
+                                </svg>
+                            </button>
+                            <div class="repo-slidebox-panel" id="repoPanel">
+                                <div class="repo-search-wrapper">
+                                    <input type="text" class="repo-search-input" id="repoSearchInput"
+                                           placeholder="Search repositories..." autocomplete="off">
+                                </div>
+                                <div class="repo-slidebox-list" id="repoList">
+                                    <!-- Populated by JS -->
+                                </div>
+                            </div>
+                        </div>
+                        <input type="hidden" id="githubRepo" value="">
+                        <small class="text-muted" id="githubRepoHint" style="display: none;"></small>
+                    </div>
+
                     <div class="input-group">
                         <label class="input-label">Tags</label>
                         <div class="tag-buttons-wrapper">

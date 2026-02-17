@@ -105,6 +105,14 @@ const createProjectValidation = [
     .trim()
     .escape(),
 
+  body('githubRepo')
+    .optional({ values: 'null' })
+    .trim()
+    .isLength({ max: 200 })
+    .withMessage('GitHub repository name must not exceed 200 characters')
+    .matches(/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/)
+    .withMessage('Invalid repository format'),
+
   handleValidationErrors
 ];
 

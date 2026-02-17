@@ -30,8 +30,9 @@ async function fetchProjectDetails() {
         // Render header
         renderProjectHeader();
 
-        // Fetch members
+        // Fetch members and commits
         await fetchMembers();
+        fetchCommits(1);
 
     } catch (error) {
         console.error('Fetch project error:', error);
@@ -297,6 +298,152 @@ function formatDate(dateString) {
     if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
     if (days < 365) return `${Math.floor(days / 30)} months ago`;
     return `${Math.floor(days / 365)} years ago`;
+}
+
+// ========================================
+// COMMIT HISTORY
+// ========================================
+let commitPage = 1;
+let commitHasNext = false;
+let commitLoading = false;
+let allCommits = [];
+
+// Fetch commits for current page
+async function fetchCommits(page = 1) {
+    if (!project || !project.github_repo) return;
+
+    const section = document.getElementById('commitsSection');
+    const container = document.getElementById('commitsContainer');
+    section.style.display = 'block';
+
+    if (page === 1) {
+        container.innerHTML = '<div class="commits-loading">Loading commits...</div>';
+    }
+
+    commitLoading = true;
+
+    try {
+        const response = await fetch(`/api/github/commits/${projectId}?page=${page}`);
+        const data = await response.json();
+
+        if (!data.success) {
+            container.innerHTML = '<div class="commits-empty">Failed to load commits.</div>';
+            commitLoading = false;
+            return;
+        }
+
+        if (page === 1) allCommits = [];
+        allCommits = allCommits.concat(data.commits);
+
+        commitPage = data.page;
+        commitHasNext = data.hasNextPage;
+        commitLoading = false;
+
+        renderCommits();
+    } catch (error) {
+        console.error('Fetch commits error:', error);
+        container.innerHTML = '<div class="commits-empty">Failed to load commits.</div>';
+        commitLoading = false;
+    }
+}
+
+// Render commits with timeline style
+function renderCommits() {
+    const container = document.getElementById('commitsContainer');
+    const pagination = document.getElementById('commitsPagination');
+
+    if (allCommits.length === 0) {
+        container.innerHTML = '<div class="commits-empty">No commits yet.</div>';
+        pagination.innerHTML = '';
+        return;
+    }
+
+    // Group commits by date
+    const grouped = {};
+    allCommits.forEach(commit => {
+        const dateKey = new Date(commit.date).toLocaleDateString('en-US', {
+            year: 'numeric', month: 'long', day: 'numeric'
+        });
+        if (!grouped[dateKey]) grouped[dateKey] = [];
+        grouped[dateKey].push(commit);
+    });
+
+    let html = '';
+    for (const [date, commits] of Object.entries(grouped)) {
+        html += `<div class="input-label" style="margin-top: 1rem; margin-bottom: 0.25rem;">${date}</div>`;
+        html += '<div class="commit-list">';
+        commits.forEach(commit => {
+            // Split message into title + body
+            const lines = commit.message.split('\n');
+            const title = lines[0];
+            const body = lines.slice(1).filter(l => l.trim()).join('\n');
+
+            const avatarHTML = commit.avatar
+                ? `<img class="commit-avatar" src="${commit.avatar}" alt="${commit.author}">`
+                : `<div class="commit-avatar-placeholder">${commit.author.charAt(0).toUpperCase()}</div>`;
+
+            html += `
+                <div class="commit-item">
+                    ${avatarHTML}
+                    <div class="commit-body">
+                        <div class="commit-message">
+                            <span class="commit-message-title">${escapeText(title)}</span>
+                            ${body ? `<div class="commit-message-body">${escapeText(body)}</div>` : ''}
+                        </div>
+                        <div class="commit-meta">
+                            <span class="commit-author">${escapeText(commit.author)}</span>
+                            <span>${formatCommitDate(commit.date)}</span>
+                            <a class="commit-sha" href="${commit.url}" target="_blank" rel="noopener">${commit.sha.substring(0, 7)}</a>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+    }
+
+    container.innerHTML = html;
+
+    // Render pagination
+    let paginationHTML = '';
+    if (commitPage > 1 || commitHasNext) {
+        if (commitPage > 1) {
+            paginationHTML += `<button class="pagination-btn" onclick="loadCommitPage(${commitPage - 1})">Previous</button>`;
+        }
+        paginationHTML += `<span class="pagination-btn active">${commitPage}</span>`;
+        if (commitHasNext) {
+            paginationHTML += `<button class="pagination-btn" onclick="loadCommitPage(${commitPage + 1})">Next</button>`;
+        }
+    }
+    pagination.innerHTML = paginationHTML;
+}
+
+// Load specific commit page (replaces current view)
+function loadCommitPage(page) {
+    allCommits = [];
+    fetchCommits(page);
+    // Scroll to commits section
+    document.getElementById('commitsSection').scrollIntoView({ behavior: 'smooth' });
+}
+
+// Escape text for safe HTML display (commits come from GitHub, not our backend)
+function escapeText(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// Format commit date with time
+function formatCommitDate(dateString) {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diff = now - date;
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+
+    if (hours < 1) return 'just now';
+    if (hours < 24) return `${hours}h ago`;
+    if (hours < 48) return 'yesterday';
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 // Initialize on page load
