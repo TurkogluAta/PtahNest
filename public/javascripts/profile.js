@@ -22,6 +22,85 @@ async function loadUserProfile() {
     }
 }
 
-// Load profile on page load
-loadUserProfile();
+// Check URL params for OAuth callback result
+function checkGithubCallback() {
+    const params = new URLSearchParams(window.location.search);
+    const githubResult = params.get('github');
+    const reason = params.get('reason');
 
+    if (!githubResult) return;
+
+    const messageEl = document.getElementById('githubMessage');
+    messageEl.style.display = 'block';
+
+    if (githubResult === 'success') {
+        messageEl.className = 'github-message github-message-success';
+        messageEl.textContent = 'GitHub account linked successfully!';
+    } else {
+        messageEl.className = 'github-message github-message-error';
+        const messages = {
+            already_linked: 'This GitHub account is already linked to another user.',
+            state_mismatch: 'Security validation failed. Please try again.',
+            token_failed: 'Failed to get access token from GitHub.',
+            user_fetch_failed: 'Failed to fetch GitHub user info.',
+            server_error: 'Server error occurred. Please try again.',
+            no_code: 'No authorization code received from GitHub.'
+        };
+        messageEl.textContent = messages[reason] || 'An error occurred linking your GitHub account.';
+    }
+
+    // Clean URL params without reload
+    window.history.replaceState({}, '', window.location.pathname);
+}
+
+// Load GitHub connection status and update UI
+async function loadGithubStatus() {
+    const statusEl = document.getElementById('githubStatus');
+    const actionsEl = document.getElementById('githubActions');
+
+    try {
+        const response = await fetch('/api/github/status');
+        const data = await response.json();
+
+        if (data.linked) {
+            statusEl.textContent = data.github_username;
+            actionsEl.innerHTML = `<button class="btn btn-outline" onclick="unlinkGithub()">Unlink GitHub</button>`;
+        } else {
+            statusEl.textContent = 'Not connected';
+            actionsEl.innerHTML = `<a href="/api/github/auth" class="btn btn-primary">Link GitHub</a>`;
+        }
+    } catch (error) {
+        console.error('Error loading GitHub status:', error);
+        statusEl.textContent = 'Error loading status';
+        actionsEl.innerHTML = '';
+    }
+}
+
+// Unlink GitHub account
+async function unlinkGithub() {
+    if (!confirm('Are you sure you want to unlink your GitHub account?')) return;
+
+    try {
+        const response = await fetch('/api/github/unlink', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            const messageEl = document.getElementById('githubMessage');
+            messageEl.style.display = 'block';
+            messageEl.className = 'github-message github-message-success';
+            messageEl.textContent = 'GitHub account unlinked.';
+            loadGithubStatus();
+        }
+    } catch (error) {
+        console.error('Error unlinking GitHub:', error);
+    }
+}
+
+// Init
+checkGithubCallback();
+loadUserProfile();
+loadGithubStatus();

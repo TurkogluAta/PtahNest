@@ -17,6 +17,7 @@ var { db, initDatabase } = require('./src/models/database');
 
 var authRouter = require('./src/routes/authRoutes');
 var projectRouter = require('./src/routes/projectRoutes');
+var githubRouter = require('./src/routes/githubRoutes');
 
 var app = express();
 
@@ -59,7 +60,7 @@ app.use(session({
     // If "remember me" is active, maxAge is set in authRoutes.js
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict'
+    sameSite: 'lax' // lax needed for OAuth redirect (callback is cross-site GET)
   }
 }));
 
@@ -90,12 +91,16 @@ const apiLimiter = rateLimit({
 // Apply rate limiters
 app.use('/api/auth', authLimiter);
 app.use('/api/projects', apiLimiter);
+app.use('/api/github', apiLimiter);
 
 // Auth routes
 app.use('/api/auth', authRouter);
 
 // Project routes
 app.use('/api/projects', projectRouter);
+
+// GitHub OAuth routes
+app.use('/api/github', githubRouter);
 
 // Redirect root to appropriate page based on auth status
 app.get('/', (req, res) => {

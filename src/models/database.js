@@ -79,6 +79,19 @@ function initDatabase() {
     )
   `);
 
+  // Migration: add GitHub columns to users table
+  const userColumns = db.pragma('table_info(users)').map(c => c.name);
+  if (!userColumns.includes('github_id')) {
+    db.exec('ALTER TABLE users ADD COLUMN github_id INTEGER');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_github_id ON users(github_id)');
+  }
+  if (!userColumns.includes('github_username')) {
+    db.exec('ALTER TABLE users ADD COLUMN github_username TEXT');
+  }
+  if (!userColumns.includes('github_token')) {
+    db.exec('ALTER TABLE users ADD COLUMN github_token TEXT');
+  }
+
   console.log('Database initialized');
 }
 
@@ -524,6 +537,41 @@ const joinRequestDb = {
   }
 };
 
+// GitHub account database operations
+const githubDb = {
+  // Link GitHub account to user (save encrypted token + github info)
+  linkAccount(userId, githubId, githubUsername, encryptedToken) {
+    const stmt = db.prepare(`
+      UPDATE users
+      SET github_id = ?, github_username = ?, github_token = ?
+      WHERE id = ?
+    `);
+    return stmt.run(githubId, githubUsername, encryptedToken, userId);
+  },
+
+  // Unlink GitHub account from user
+  unlinkAccount(userId) {
+    const stmt = db.prepare(`
+      UPDATE users
+      SET github_id = NULL, github_username = NULL, github_token = NULL
+      WHERE id = ?
+    `);
+    return stmt.run(userId);
+  },
+
+  // Find user by GitHub ID (for duplicate check)
+  findByGithubId(githubId) {
+    const stmt = db.prepare('SELECT id, username FROM users WHERE github_id = ?');
+    return stmt.get(githubId);
+  },
+
+  // Get GitHub info for a user
+  getGithubInfo(userId) {
+    const stmt = db.prepare('SELECT github_id, github_username, github_token FROM users WHERE id = ?');
+    return stmt.get(userId);
+  }
+};
+
 module.exports = {
   db,
   initDatabase,
@@ -531,5 +579,6 @@ module.exports = {
   loginAttemptDb,
   projectDb,
   memberDb,
-  joinRequestDb
+  joinRequestDb,
+  githubDb
 };
