@@ -72,7 +72,7 @@ function renderProjectCard(project) {
         : '';
 
     return `
-        <div class="card card-hover card-bottom-gap" onclick="window.location.href='/pages/project-detail.html?id=${project.id}'" style="cursor: pointer;">
+        <div class="card card-hover card-bottom-gap card-clickable" onclick="window.location.href='/pages/project-detail.html?id=${project.id}'">
             <div class="project-card-header">
                 <div>
                     <div class="card-title">${project.name}</div>
@@ -359,7 +359,7 @@ function renderJoinRequests() {
 
     if (allJoinRequests.length === 0) {
         container.innerHTML = `
-            <div class="card" style="text-align: center;">
+            <div class="card card-centered">
                 <p class="text-muted">No pending join requests</p>
             </div>
         `;

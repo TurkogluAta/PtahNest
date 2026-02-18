@@ -1696,3 +1696,99 @@ textarea.input-field {
     padding: 2rem;
     color: var(--text-3);
 }
+
+/* =========================================================
+   UTILITY / LAYOUT HELPERS
+   ========================================================= */
+/* Flex row: space-between, top-aligned */
+.flex-between-start {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+/* Flex row: space-between, vertically centered */
+.flex-between-center {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Action button row */
+.action-row {
+    display: flex;
+    gap: 1rem;
+}
+
+/* Card with reduced padding (e.g. member cards) */
+.card-sm {
+    padding: 1rem;
+}
+
+/* Centered content inside a card */
+.card-centered {
+    text-align: center;
+}
+
+/* Clickable card (cursor + pointer) */
+.card-clickable {
+    cursor: pointer;
+}
+
+/* Section block with top margin */
+.section-block {
+    margin-top: 1rem;
+}
+
+/* Project meta with reduced top margin override */
+.project-meta-sm {
+    margin-top: 0.5rem;
+}
+
+/* Looking-for strip without the top border/padding */
+.project-looking-for-flush {
+    border-top: none;
+    padding-top: 0;
+}
+
+/* Member name text */
+.member-name {
+    font-weight: 600;
+    color: var(--text-1);
+}
+
+/* Member role text */
+.member-role {
+    font-size: 0.85rem;
+    color: var(--text-2);
+    margin-top: 0.25rem;
+}
+
+/* Member join date text */
+.member-joined {
+    font-size: 0.75rem;
+    color: var(--text-3);
+    margin-top: 0.25rem;
+}
+
+/* Danger variant for btn-outline (delete / leave) */
+.btn-danger {
+    color: #ef4444;
+    border-color: #ef4444;
+}
+
+.btn-danger:hover {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: #ef4444;
+}
+
+/* Commit date group label */
+.commit-date-label {
+    margin-top: 1rem;
+    margin-bottom: 0.25rem;
+}
+
+/* Hidden by default — toggled by JS */
+.hidden {
+    display: none;
+}

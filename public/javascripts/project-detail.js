@@ -71,7 +71,7 @@ async function fetchMembers() {
 // Render project header
 function renderProjectHeader() {
     const headerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div class="flex-between-start">
             <div>
                 <h1 class="hero-title">${project.name}</h1>
                 <p class="text-muted">Created by ${project.creator_username}</p>
@@ -85,16 +85,16 @@ function renderProjectHeader() {
 // Render project details
 function renderProjectDetails() {
     const tagsHTML = project.tags && project.tags.length > 0
-        ? `<div style="margin-top: 1rem;">
+        ? `<div class="section-block">
              <div class="input-label">Tags</div>
              <div class="project-tags">${project.tags.map(tag => `<span class="project-tag">${tag}</span>`).join('')}</div>
            </div>`
         : '';
 
     const lookingForHTML = project.lookingFor && project.lookingFor.length > 0
-        ? `<div style="margin-top: 1rem;">
+        ? `<div class="section-block">
              <div class="input-label">Looking For</div>
-             <div class="project-looking-for" style="border-top: none; padding-top: 0;">
+             <div class="project-looking-for project-looking-for-flush">
                ${project.lookingFor.map(role => `<span class="role-tag">${role}</span>`).join('')}
              </div>
            </div>`
@@ -107,9 +107,9 @@ function renderProjectDetails() {
         </div>
         ${tagsHTML}
         ${lookingForHTML}
-        <div style="margin-top: 1rem;">
+        <div class="section-block">
             <div class="input-label">Project Info</div>
-            <div class="project-meta" style="margin-top: 0.5rem;">
+            <div class="project-meta project-meta-sm">
                 <span class="meta-inline">
                     <img src="../pictures/icons/members.svg" width="16">
                     ${members.length} Members
@@ -139,14 +139,14 @@ function renderMembers() {
     }
 
     const membersHTML = members.map(member => `
-        <div class="card card-bottom-gap" style="padding: 1rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="card card-sm card-bottom-gap">
+            <div class="flex-between-center">
                 <div>
-                    <div style="font-weight: 600; color: var(--text-1);">${member.username}</div>
-                    <div style="font-size: 0.85rem; color: var(--text-2); margin-top: 0.25rem;">
+                    <div class="member-name">${member.username}</div>
+                    <div class="member-role">
                         ${member.role === 'creator' ? 'Project Creator' : 'Team Member'}
                     </div>
-                    <div style="font-size: 0.75rem; color: var(--text-3); margin-top: 0.25rem;">
+                    <div class="member-joined">
                         Joined ${formatDate(member.joined_at)}
                     </div>
                 </div>
@@ -163,7 +163,7 @@ function renderActions() {
     // Don't show actions if project is deleted
     if (project.status === 'deleted') {
         document.getElementById('actionsSection').innerHTML = `
-            <div class="card" style="padding: 1rem; text-align: center;">
+            <div class="card card-sm card-centered">
                 <p class="text-muted">This project has been deleted</p>
             </div>
         `;
@@ -173,18 +173,18 @@ function renderActions() {
     const isCreator = project.creator_id === currentUserId;
     const isMember = members.some(m => m.user_id === currentUserId && m.role !== 'creator');
 
-    let actionsHTML = '<div style="display: flex; gap: 1rem;">';
+    let actionsHTML = '<div class="action-row">';
 
     if (isCreator) {
         // Creator actions: Edit + Delete
         actionsHTML += `
             <button class="btn btn-primary" onclick="editProject()">Edit Project</button>
-            <button class="btn btn-outline" style="color: #ef4444; border-color: #ef4444;" onclick="deleteProject()">Delete Project</button>
+            <button class="btn btn-outline btn-danger" onclick="deleteProject()">Delete Project</button>
         `;
     } else if (isMember) {
         // Member action: Leave
         actionsHTML += `
-            <button class="btn btn-outline" style="color: #ef4444; border-color: #ef4444;" onclick="leaveProject()">Leave Project</button>
+            <button class="btn btn-outline btn-danger" onclick="leaveProject()">Leave Project</button>
         `;
     }
 
@@ -370,7 +370,7 @@ function renderCommits() {
 
     let html = '';
     for (const [date, commits] of Object.entries(grouped)) {
-        html += `<div class="input-label" style="margin-top: 1rem; margin-bottom: 0.25rem;">${date}</div>`;
+        html += `<div class="input-label commit-date-label">${date}</div>`;
         html += '<div class="commit-list">';
         commits.forEach(commit => {
             // Split message into title + body
