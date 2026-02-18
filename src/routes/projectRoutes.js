@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { projectDb, userDb, memberDb, joinRequestDb } = require('../models/database');
+const { sendCollaboratorInvite } = require('./githubRoutes');
 const {
   createProjectValidation,
   updateProjectValidation,
@@ -409,14 +410,19 @@ router.patch('/:id/requests/:requestId', requireAuth, paramIdValidation, paramRe
     }
 
     if (action === 'accept') {
-      // Accept request
+      // Accept request and add user as member
       joinRequestDb.accept(requestId);
-      // Add user as member
       memberDb.addMember(projectId, joinRequest.user_id, 'member');
+
+      // Send GitHub collaborator invite if project has a linked repo
+      const githubInvite = project.github_repo
+        ? await sendCollaboratorInvite(projectId, joinRequest.user_id, project.github_repo, project.creator_id)
+        : null;
 
       res.json({
         success: true,
-        message: 'Join request accepted'
+        message: 'Join request accepted',
+        githubInvite
       });
     } else if (action === 'reject') {
       // Reject request

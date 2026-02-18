@@ -431,7 +431,18 @@ async function acceptRequest(requestId, projectId) {
         const data = await response.json();
 
         if (response.ok) {
-            alert('Request accepted! User added to project.');
+            // Build message based on GitHub invite result
+            let msg = 'Request accepted! User added to project.';
+            if (data.githubInvite) {
+                if (data.githubInvite.sent && data.githubInvite.autoAccepted) {
+                    msg = 'Request accepted! User added to project and GitHub repo.';
+                } else if (data.githubInvite.sent) {
+                    msg = 'Request accepted! User added to project. GitHub repo invite sent (pending acceptance).';
+                } else {
+                    msg = `Request accepted! User added to project. GitHub invite failed: ${data.githubInvite.error}`;
+                }
+            }
+            alert(msg);
             // Remove from list
             allJoinRequests = allJoinRequests.filter(r => r.id !== requestId);
             updateRequestsBadge();

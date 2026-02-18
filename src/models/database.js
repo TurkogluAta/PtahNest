@@ -98,6 +98,15 @@ function initDatabase() {
     db.exec('ALTER TABLE projects ADD COLUMN github_repo TEXT');
   }
 
+  // Migration: add github_invited columns to project_members table
+  const memberColumns = db.pragma('table_info(project_members)').map(c => c.name);
+  if (!memberColumns.includes('github_invited')) {
+    db.exec('ALTER TABLE project_members ADD COLUMN github_invited INTEGER DEFAULT 0');
+  }
+  if (!memberColumns.includes('github_invited_at')) {
+    db.exec('ALTER TABLE project_members ADD COLUMN github_invited_at DATETIME');
+  }
+
   console.log('Database initialized');
 }
 
@@ -588,6 +597,26 @@ const githubDb = {
   getGithubInfo(userId) {
     const stmt = db.prepare('SELECT github_id, github_username, github_token FROM users WHERE id = ?');
     return stmt.get(userId);
+  },
+
+  // Update GitHub invite status for a project member
+  updateInviteStatus(projectId, userId, status) {
+    const stmt = db.prepare(`
+      UPDATE project_members
+      SET github_invited = ?, github_invited_at = CURRENT_TIMESTAMP
+      WHERE project_id = ? AND user_id = ? AND membership_status = 'active'
+    `);
+    return stmt.run(status, projectId, userId);
+  },
+
+  // Count invites sent for a project in the last X hours (rate limit)
+  getInviteCount(projectId, hours) {
+    const stmt = db.prepare(`
+      SELECT COUNT(*) as count FROM project_members
+      WHERE project_id = ? AND github_invited > 0
+        AND github_invited_at >= datetime('now', '-' || ? || ' hours')
+    `);
+    return stmt.get(projectId, hours).count;
   }
 };
 

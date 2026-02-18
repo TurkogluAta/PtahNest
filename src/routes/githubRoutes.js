@@ -228,6 +228,102 @@ router.get('/commits/:projectId', requireAuth, async (req, res) => {
   }
 });
 
+// Send GitHub collaborator invite and auto-accept on behalf of the invited user.
+// Returns an object: { sent: true/false, autoAccepted?: true, error?: string }
+async function sendCollaboratorInvite(projectId, invitedUserId, githubRepo, creatorId) {
+  // Check if invited user has a GitHub account linked
+  const invitedUser = githubDb.getGithubInfo(invitedUserId);
+  if (!invitedUser || !invitedUser.github_username) {
+    return { sent: false, error: 'User has no GitHub account linked' };
+  }
+
+  // Check if creator has a GitHub token
+  const creatorGithub = githubDb.getGithubInfo(creatorId);
+  if (!creatorGithub || !creatorGithub.github_token) {
+    return { sent: false, error: 'Link your GitHub account first to send invites' };
+  }
+
+  // Rate limit: max 24 invites per project per 24 hours
+  const inviteCount = githubDb.getInviteCount(projectId, 24);
+  if (inviteCount >= 24) {
+    return { sent: false, error: 'Invite rate limit exceeded (24/24h). Try again later' };
+  }
+
+  try {
+    const accessToken = decrypt(creatorGithub.github_token);
+    const [owner, repo] = githubRepo.split('/');
+
+    // Send collaborator invite via GitHub API
+    const ghResponse = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/collaborators/${invitedUser.github_username}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/vnd.github+json'
+        }
+      }
+    );
+
+    if (ghResponse.status === 201) {
+      // 201 = invite sent
+      githubDb.updateInviteStatus(projectId, invitedUserId, 1);
+
+      // Auto-accept: use invited user's token to accept the invite
+      try {
+        const userToken = decrypt(invitedUser.github_token);
+
+        // Fetch pending invitations for the user
+        const invitesRes = await fetch('https://api.github.com/user/repository_invitations', {
+          headers: {
+            'Authorization': `Bearer ${userToken}`,
+            'Accept': 'application/vnd.github+json'
+          }
+        });
+
+        if (invitesRes.ok) {
+          const invites = await invitesRes.json();
+          const repoInvite = invites.find(inv => inv.repository.full_name === githubRepo);
+
+          if (repoInvite) {
+            const acceptRes = await fetch(
+              `https://api.github.com/user/repository_invitations/${repoInvite.id}`, {
+                method: 'PATCH',
+                headers: {
+                  'Authorization': `Bearer ${userToken}`,
+                  'Accept': 'application/vnd.github+json'
+                }
+              }
+            );
+
+            if (acceptRes.status === 204) {
+              githubDb.updateInviteStatus(projectId, invitedUserId, 2);
+              return { sent: true, autoAccepted: true };
+            }
+          }
+        }
+      } catch (autoErr) {
+        // Auto-accept failed but invite was still sent
+        console.error('GitHub auto-accept error:', autoErr);
+      }
+
+      return { sent: true };
+
+    } else if (ghResponse.status === 204) {
+      // 204 = already a collaborator
+      githubDb.updateInviteStatus(projectId, invitedUserId, 2);
+      return { sent: true, autoAccepted: true };
+
+    } else {
+      const ghError = await ghResponse.json().catch(() => ({}));
+      return { sent: false, error: ghError.message || `GitHub API error (${ghResponse.status})` };
+    }
+
+  } catch (ghErr) {
+    console.error('GitHub invite error:', ghErr);
+    return { sent: false, error: 'Failed to send GitHub invite' };
+  }
+}
+
 // POST /unlink - Unlink GitHub account
 router.post('/unlink', requireAuth, (req, res) => {
   const info = githubDb.getGithubInfo(req.session.userId);
@@ -241,3 +337,4 @@ router.post('/unlink', requireAuth, (req, res) => {
 });
 
 module.exports = router;
+module.exports.sendCollaboratorInvite = sendCollaboratorInvite;
