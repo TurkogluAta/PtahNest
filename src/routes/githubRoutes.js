@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const router = express.Router();
-const { githubDb, projectDb, memberDb } = require('../models/database');
+const { githubDb, projectDb, memberDb, userDb } = require('../models/database');
 const { encrypt, decrypt } = require('../utils/encryption');
 
 // Auth middleware - require logged in user
@@ -171,10 +171,10 @@ router.get('/commits/:projectId', requireAuth, async (req, res) => {
       return res.json({ success: true, commits: [], totalCount: 0 });
     }
 
-    // Get creator's GitHub token to fetch commits
-    const info = githubDb.getGithubInfo(project.creator_id);
+    // Use the requesting user's own GitHub token (they are a collaborator on the repo)
+    const info = githubDb.getGithubInfo(req.session.userId);
     if (!info || !info.github_token) {
-      return res.json({ success: true, commits: [], totalCount: 0 });
+      return res.status(403).json({ success: false, message: 'GitHub account not linked', githubRequired: true });
     }
 
     const accessToken = decrypt(info.github_token);
@@ -330,6 +330,17 @@ router.post('/unlink', requireAuth, (req, res) => {
 
   if (!info || !info.github_id) {
     return res.status(400).json({ success: false, message: 'No GitHub account linked' });
+  }
+
+  // Block unlink if user is creator of any active software project
+  const creatorProjects = projectDb.getActiveSoftwareProjectsAsCreator(req.session.userId);
+  if (creatorProjects.length > 0) {
+    const names = creatorProjects.map(p => p.name).join(', ');
+    return res.status(400).json({
+      success: false,
+      message: `You are the creator of active software project(s): ${names}. Delete or transfer these projects before unlinking GitHub.`,
+      blockedByCreator: true
+    });
   }
 
   githubDb.unlinkAccount(req.session.userId);

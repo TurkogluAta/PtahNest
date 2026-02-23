@@ -789,6 +789,23 @@ body::after {
     white-space: nowrap;
 }
 
+.badge-group {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.badge-type-software {
+    background: rgba(102, 126, 234, 0.15);
+    color: var(--primary);
+}
+
+.badge-type-research {
+    background: rgba(210, 153, 34, 0.15);
+    color: var(--warning);
+}
+
 .badge-success {
     background: rgba(63, 185, 80, 0.15);
     color: var(--success);
@@ -1013,6 +1030,35 @@ textarea.input-field {
 }
 
 /* Tag button styles (for project creation form) */
+.type-toggle {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.type-btn {
+    padding: 0.5rem 1.25rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-2);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+
+.type-btn:hover {
+    border-color: var(--primary);
+    color: var(--text-1);
+}
+
+.type-btn.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+}
+
 .tag-btn {
     padding: 0.5rem 1rem;
     background: var(--surface);

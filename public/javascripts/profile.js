@@ -78,7 +78,8 @@ async function loadGithubStatus() {
 
 // Unlink GitHub account
 async function unlinkGithub() {
-    if (!confirm('Are you sure you want to unlink your GitHub account?')) return;
+    // Warn member-only users that commit history will be unavailable after unlink
+    if (!confirm('Are you sure you want to unlink your GitHub account?\n\nIf you are a member of any software projects, you will lose access to commit history and GitHub features until you re-link.')) return;
 
     try {
         const response = await fetch('/api/github/unlink', {
@@ -87,13 +88,17 @@ async function unlinkGithub() {
         });
 
         const data = await response.json();
+        const messageEl = document.getElementById('githubMessage');
+        messageEl.style.display = 'block';
 
         if (data.success) {
-            const messageEl = document.getElementById('githubMessage');
-            messageEl.style.display = 'block';
             messageEl.className = 'github-message github-message-success';
             messageEl.textContent = 'GitHub account unlinked.';
             loadGithubStatus();
+        } else {
+            // Show error (e.g. blocked because user is a software project creator)
+            messageEl.className = 'github-message github-message-error';
+            messageEl.textContent = data.message || 'Failed to unlink GitHub account.';
         }
     } catch (error) {
         console.error('Error unlinking GitHub:', error);

@@ -15,6 +15,9 @@ function initDatabase() {
       username_lower TEXT UNIQUE NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
+      github_id INTEGER UNIQUE,
+      github_username TEXT,
+      github_token TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -38,10 +41,12 @@ function initDatabase() {
       name TEXT NOT NULL,
       description TEXT NOT NULL,
       project_status TEXT NOT NULL,
+      project_type TEXT NOT NULL DEFAULT 'software',
       creator_id TEXT NOT NULL,
       tags TEXT NOT NULL,
       looking_for TEXT NOT NULL,
       recruitment_open INTEGER NOT NULL DEFAULT 1,
+      github_repo TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (creator_id) REFERENCES users(id)
@@ -56,6 +61,8 @@ function initDatabase() {
       user_id TEXT NOT NULL,
       role TEXT NOT NULL,
       membership_status TEXT NOT NULL DEFAULT 'active',
+      github_invited INTEGER DEFAULT 0,
+      github_invited_at DATETIME,
       joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       left_at DATETIME,
       FOREIGN KEY (project_id) REFERENCES projects(id),
@@ -78,34 +85,6 @@ function initDatabase() {
       UNIQUE(project_id, user_id)
     )
   `);
-
-  // Migration: add GitHub columns to users table
-  const userColumns = db.pragma('table_info(users)').map(c => c.name);
-  if (!userColumns.includes('github_id')) {
-    db.exec('ALTER TABLE users ADD COLUMN github_id INTEGER');
-    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_github_id ON users(github_id)');
-  }
-  if (!userColumns.includes('github_username')) {
-    db.exec('ALTER TABLE users ADD COLUMN github_username TEXT');
-  }
-  if (!userColumns.includes('github_token')) {
-    db.exec('ALTER TABLE users ADD COLUMN github_token TEXT');
-  }
-
-  // Migration: add github_repo column to projects table
-  const projectColumns = db.pragma('table_info(projects)').map(c => c.name);
-  if (!projectColumns.includes('github_repo')) {
-    db.exec('ALTER TABLE projects ADD COLUMN github_repo TEXT');
-  }
-
-  // Migration: add github_invited columns to project_members table
-  const memberColumns = db.pragma('table_info(project_members)').map(c => c.name);
-  if (!memberColumns.includes('github_invited')) {
-    db.exec('ALTER TABLE project_members ADD COLUMN github_invited INTEGER DEFAULT 0');
-  }
-  if (!memberColumns.includes('github_invited_at')) {
-    db.exec('ALTER TABLE project_members ADD COLUMN github_invited_at DATETIME');
-  }
 
   console.log('Database initialized');
 }
@@ -221,14 +200,14 @@ const loginAttemptDb = {
 // Project database operations
 const projectDb = {
   // CREATE
-  create(name, description, creatorId, tags, lookingFor, recruitmentOpen, githubRepo = null) {
+  create(name, description, creatorId, tags, lookingFor, recruitmentOpen, githubRepo = null, projectType = 'software') {
     const id = require('crypto').randomUUID();
     const memberId = require('crypto').randomUUID();
 
     // Insert project
     const stmt = db.prepare(`
-      INSERT INTO projects (id, name, description, project_status, creator_id, tags, looking_for, recruitment_open, github_repo)
-      VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)
+      INSERT INTO projects (id, name, description, project_status, creator_id, tags, looking_for, recruitment_open, github_repo, project_type)
+      VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       id,
@@ -238,7 +217,8 @@ const projectDb = {
       JSON.stringify(tags),
       JSON.stringify(lookingFor),
       recruitmentOpen ? 1 : 0,
-      githubRepo
+      githubRepo,
+      projectType
     );
 
     // Add creator as member with role 'creator'
@@ -248,7 +228,16 @@ const projectDb = {
     `);
     memberStmt.run(memberId, id, creatorId);
 
-    return { id, name, description, project_status: 'active', tags, lookingFor, recruitmentOpen };
+    return { id, name, description, project_status: 'active', tags, lookingFor, recruitmentOpen, projectType };
+  },
+
+  // Check if creator already has an active project with the same name
+  hasActiveDuplicateName(creatorId, name) {
+    const stmt = db.prepare(`
+      SELECT id FROM projects
+      WHERE creator_id = ? AND name = ? AND project_status = 'active'
+    `);
+    return stmt.get(creatorId, name) !== undefined;
   },
 
   // Check if a GitHub repo is already used by an active project
@@ -293,10 +282,11 @@ const projectDb = {
 
       return {
         ...row,
-        status: displayStatus, // Frontend uses this
+        status: displayStatus,
         tags: JSON.parse(row.tags),
         lookingFor: JSON.parse(row.looking_for),
         recruitmentOpen: Boolean(row.recruitment_open),
+        projectType: row.project_type,
         members: row.members
       };
     });
@@ -338,10 +328,11 @@ const projectDb = {
 
     return rows.map(row => ({
       ...row,
-      status: row.project_status, // Frontend expects 'status' field
+      status: row.project_status,
       tags: JSON.parse(row.tags),
       lookingFor: JSON.parse(row.looking_for),
       recruitmentOpen: Boolean(row.recruitment_open),
+      projectType: row.project_type,
       members: row.members
     }));
   },
@@ -355,10 +346,11 @@ const projectDb = {
 
     return {
       ...row,
-      status: row.project_status, // Frontend expects 'status' field
+      status: row.project_status,
       tags: JSON.parse(row.tags),
       lookingFor: JSON.parse(row.looking_for),
-      recruitmentOpen: Boolean(row.recruitment_open)
+      recruitmentOpen: Boolean(row.recruitment_open),
+      projectType: row.project_type
     };
   },
 
@@ -395,6 +387,15 @@ const projectDb = {
     `);
     const result = stmt.run(project.recruitment_open ? 0 : 1, id, creatorId);
     return result.changes > 0;
+  },
+
+  // READ: Get active software projects where user is the creator (used for unlink check)
+  getActiveSoftwareProjectsAsCreator(userId) {
+    const stmt = db.prepare(`
+      SELECT id, name FROM projects
+      WHERE creator_id = ? AND project_status = 'active' AND project_type = 'software'
+    `);
+    return stmt.all(userId);
   },
 
   // DELETE: Soft delete project

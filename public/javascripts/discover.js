@@ -1,3 +1,9 @@
+// Project type definitions — add new types here only
+const PROJECT_TYPES = {
+  software: { label: 'Software', badgeClass: 'badge-type-software' },
+  research: { label: 'Research', badgeClass: 'badge-type-research' },
+};
+
 // State
 let discoverProjects = [];
 
@@ -138,7 +144,10 @@ function renderProjectCard(project) {
                     <div class="card-title">${project.name}</div>
                     <div class="card-desc no-margin">${project.description}</div>
                 </div>
-                <span class="badge badge-success">Recruiting</span>
+                <div class="badge-group">
+                    ${(() => { const t = PROJECT_TYPES[project.projectType] || PROJECT_TYPES.software; return `<span class="badge ${t.badgeClass}">${t.label}</span>`; })()}
+                    <span class="badge badge-success">Recruiting</span>
+                </div>
             </div>
             ${tagsHTML}
             ${lookingForHTML}
@@ -362,6 +371,11 @@ async function joinProject(projectId) {
             // Remove project from discover list
             discoverProjects = discoverProjects.filter(p => p.id !== projectId);
             renderProjects();
+        } else if (data.githubRequired) {
+            // Software project but user has no GitHub linked
+            if (confirm(data.message + '\n\nGo to profile to link GitHub?')) {
+                window.location.href = '/pages/profile.html';
+            }
         } else {
             alert(data.message || 'Failed to send join request');
         }

@@ -327,7 +327,12 @@ async function fetchCommits(page = 1) {
         const data = await response.json();
 
         if (!data.success) {
-            container.innerHTML = '<div class="commits-empty">Failed to load commits.</div>';
+            // GitHub not linked — show connect prompt instead of generic error
+            if (data.githubRequired) {
+                container.innerHTML = `<div class="commits-empty">Link your GitHub account to view commit history. <a href="/pages/profile.html">Go to Profile</a></div>`;
+            } else {
+                container.innerHTML = '<div class="commits-empty">Failed to load commits.</div>';
+            }
             commitLoading = false;
             return;
         }

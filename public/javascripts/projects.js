@@ -1,6 +1,13 @@
+// Project type definitions — add new types here only
+const PROJECT_TYPES = {
+  software: { label: 'Software', badgeClass: 'badge-type-software' },
+  research: { label: 'Research', badgeClass: 'badge-type-research' },
+};
+
 // State
 let projects = [];
 let allJoinRequests = [];
+let githubLinked = false;
 
 // Pagination state
 const PROJECTS_PER_PAGE = 4;
@@ -78,7 +85,10 @@ function renderProjectCard(project) {
                     <div class="card-title">${project.name}</div>
                     <div class="card-desc no-margin">${project.description}</div>
                 </div>
-                <span class="badge ${getBadgeClass(project.status)}">${getBadgeText(project.status)}</span>
+                <div class="badge-group">
+                    ${(() => { const t = PROJECT_TYPES[project.projectType] || PROJECT_TYPES.software; return `<span class="badge ${t.badgeClass}">${t.label}</span>`; })()}
+                    <span class="badge ${getBadgeClass(project.status)}">${getBadgeText(project.status)}</span>
+                </div>
             </div>
             ${tagsHTML}
             ${lookingForHTML}
@@ -226,6 +236,44 @@ cancelBtn.addEventListener('click', () => {
     selectedTagsSet.clear();
     tagButtons.forEach(btn => btn.classList.remove('active'));
     document.getElementById('selectedTags').value = '';
+    // Reset project type to default by triggering software button click
+    document.querySelector('.type-btn[data-type="software"]').click();
+});
+
+// Project type toggle
+document.querySelectorAll('.type-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('projectType').value = btn.dataset.type;
+
+        // Show/hide GitHub repo section based on type
+        const repoGroup = document.getElementById('githubRepoGroup');
+        const hint = document.getElementById('projectTypeHint');
+        const lookingForGroup = document.getElementById('lookingForGroup');
+        const presetTagsGroup = document.getElementById('presetTagsGroup');
+        if (btn.dataset.type === 'software') {
+            repoGroup.style.display = 'block';
+            lookingForGroup.style.display = 'block';
+            presetTagsGroup.style.display = 'flex';
+            if (!githubLinked) {
+                hint.textContent = 'Software projects require a linked GitHub account.';
+                hint.style.display = 'block';
+                hint.style.color = 'var(--danger, #f85149)';
+            }
+        } else {
+            repoGroup.style.display = 'none';
+            document.getElementById('githubRepo').value = '';
+            document.getElementById('repoSelectedText').textContent = 'No repository';
+            hint.style.display = 'none';
+            // Hide roles and preset tags for research projects
+            lookingForGroup.style.display = 'none';
+            presetTagsGroup.style.display = 'none';
+            document.querySelectorAll('input[type="checkbox"].checkbox').forEach(cb => cb.checked = false);
+            selectedTagsSet.clear();
+            tagButtons.forEach(b => b.classList.remove('active'));
+        }
+    });
 });
 
 // Handle form submission
@@ -246,20 +294,29 @@ document.getElementById('createProjectForm').addEventListener('submit', async (e
 
     // Get selected GitHub repo (empty string = null)
     const githubRepo = document.getElementById('githubRepo').value || null;
+    const projectType = document.getElementById('projectType').value;
 
     try {
         const response = await fetch('/api/projects', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, description, tags, lookingFor, githubRepo })
+            body: JSON.stringify({ name, description, tags, lookingFor, githubRepo, projectType })
         });
 
-        const data = await response.json();
-
+        // GitHub not linked — redirect to profile
         if (!response.ok) {
+            const data = await response.json();
+            if (data.githubRequired) {
+                if (confirm(data.message + '\n\nGo to profile to link GitHub?')) {
+                    window.location.href = '/pages/profile.html';
+                }
+                return;
+            }
             alert(data.message || 'Failed to create project');
             return;
         }
+
+        const data = await response.json();
 
         // Add new project to beginning
         projects.unshift(data.project);
@@ -587,10 +644,19 @@ async function loadGithubRepos() {
         const statusRes = await fetch('/api/github/status');
         const statusData = await statusRes.json();
 
+        // Save GitHub link status for use in type toggle
+        githubLinked = statusData.linked;
+
+        // Show warning immediately on load if GitHub not linked (default type is software)
+        if (!githubLinked) {
+            const typeHint = document.getElementById('projectTypeHint');
+            typeHint.textContent = 'Software projects require a linked GitHub account.';
+            typeHint.style.display = 'block';
+            typeHint.style.color = 'var(--danger, #f85149)';
+        }
+
         if (!statusData.linked) {
             trigger.disabled = true;
-            hint.textContent = 'Link your GitHub account in Profile to select a repository.';
-            hint.style.display = 'block';
             return;
         }
 

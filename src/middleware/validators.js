@@ -113,6 +113,11 @@ const createProjectValidation = [
     .matches(/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/)
     .withMessage('Invalid repository format'),
 
+  body('projectType')
+    .optional()
+    .isIn(['software', 'research'])
+    .withMessage('Project type must be software or research'),
+
   handleValidationErrors
 ];
 

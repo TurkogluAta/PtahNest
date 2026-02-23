@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { projectDb, userDb, memberDb, joinRequestDb } = require('../models/database');
+const { projectDb, userDb, memberDb, joinRequestDb, githubDb } = require('../models/database');
 const { sendCollaboratorInvite } = require('./githubRoutes');
 const {
   createProjectValidation,
@@ -25,8 +25,29 @@ function requireAuth(req, res, next) {
 // CREATE: New project
 router.post('/', requireAuth, createProjectValidation, async (req, res) => {
   try {
-    const { name, description, tags, lookingFor, githubRepo } = req.body;
+    const { name, description, tags, lookingFor, githubRepo, projectType } = req.body;
     const repoValue = githubRepo || null;
+    const typeValue = projectType || 'software';
+
+    // Software projects require GitHub to be linked
+    if (typeValue === 'software') {
+      const githubInfo = githubDb.getGithubInfo(req.session.userId);
+      if (!githubInfo || !githubInfo.github_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Software projects require a linked GitHub account. Please link your GitHub account first.',
+          githubRequired: true
+        });
+      }
+    }
+
+    // Check if user already has an active project with the same name
+    if (projectDb.hasActiveDuplicateName(req.session.userId, name)) {
+      return res.status(400).json({
+        success: false,
+        message: 'You already have an active project with this name'
+      });
+    }
 
     // Check if repo is already used by another active project
     if (repoValue && projectDb.isRepoInUse(repoValue)) {
@@ -47,7 +68,8 @@ router.post('/', requireAuth, createProjectValidation, async (req, res) => {
       tags,
       lookingFor,
       recruitmentOpen,
-      repoValue
+      repoValue,
+      typeValue
     );
 
     res.status(201).json({
@@ -258,6 +280,18 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
         success: false,
         message: "You can't join your own project"
       });
+    }
+
+    // Software projects require GitHub to be linked
+    if (project.projectType === 'software') {
+      const githubInfo = githubDb.getGithubInfo(userId);
+      if (!githubInfo || !githubInfo.github_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'This is a software project. Please link your GitHub account before sending a join request.',
+          githubRequired: true
+        });
+      }
     }
 
     // Check if user is already a member

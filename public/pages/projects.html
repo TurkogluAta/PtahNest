@@ -80,6 +80,16 @@
 
                 <form id="createProjectForm">
                     <div class="input-group">
+                        <label class="input-label">Project Type</label>
+                        <div class="type-toggle" id="projectTypeToggle">
+                            <button type="button" class="type-btn active" data-type="software">Software</button>
+                            <button type="button" class="type-btn" data-type="research">Research</button>
+                        </div>
+                        <input type="hidden" id="projectType" value="software">
+                        <small id="projectTypeHint" style="display:none;"></small>
+                    </div>
+
+                    <div class="input-group">
                         <label class="input-label" for="projectName">Project Name</label>
                         <input type="text" id="projectName" class="input-field"
                                placeholder="Enter project name" required>
@@ -93,7 +103,7 @@
                     </div>
 
                     <div class="input-group" id="githubRepoGroup">
-                        <label class="input-label">GitHub Repository (Optional)</label>
+                        <label class="input-label">GitHub Repository</label>
                         <div class="repo-slidebox" id="repoSlidebox">
                             <button type="button" class="repo-slidebox-trigger" id="repoTrigger" disabled>
                                 <span class="repo-slidebox-text" id="repoSelectedText">No repository</span>
@@ -117,7 +127,7 @@
 
                     <div class="input-group">
                         <label class="input-label">Tags</label>
-                        <div class="tag-buttons-wrapper">
+                        <div class="tag-buttons-wrapper" id="presetTagsGroup">
                             <button type="button" class="tag-btn" data-tag="Frontend">Frontend</button>
                             <button type="button" class="tag-btn" data-tag="Backend">Backend</button>
                             <button type="button" class="tag-btn" data-tag="Mobile">Mobile</button>
@@ -130,7 +140,7 @@
                         <input type="hidden" id="selectedTags" value="">
                     </div>
 
-                    <div class="input-group">
+                    <div class="input-group" id="lookingForGroup">
                         <label class="input-label">Looking For (Roles)</label>
                         <div class="role-checkboxes-grid">
                             <div class="checkbox-wrapper">
