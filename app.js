@@ -7,13 +7,13 @@ var path = require('path');
 var cookieParser = require('cookie-parser');
 var logger = require('morgan');
 var session = require('express-session');
-var SQLiteStore = require('better-sqlite3-session-store')(session);
+var pgSession = require('connect-pg-simple')(session);
 var helmet = require('helmet');
 var rateLimit = require('express-rate-limit');
 var { validateSessionFingerprint } = require('./src/middleware/sessionSecurity');
 
 // Database
-var { db, initDatabase } = require('./src/models/database');
+var { pool, initDatabase } = require('./src/models/database');
 
 var authRouter = require('./src/routes/authRoutes');
 var projectRouter = require('./src/routes/projectRoutes');
@@ -25,8 +25,11 @@ var app = express();
 // Should be true in production, false in development
 app.set('trust proxy', process.env.NODE_ENV === 'production');
 
-// Initialize database
-initDatabase();
+// Initialize database (async - tables are created before server starts)
+initDatabase().catch(err => {
+  console.error('Database initialization failed:', err);
+  process.exit(1);
+});
 
 // view engine setup
 app.set('views', path.join(__dirname, 'views'));
@@ -43,12 +46,10 @@ app.use(helmet());
 
 // Session configuration
 app.use(session({
-  store: new SQLiteStore({
-    client: db,
-    expired: {
-      clear: true,
-      intervalMs: 900000 // Clean expired sessions every 15 minutes
-    }
+  store: new pgSession({
+    pool,
+    tableName: 'sessions',
+    createTableIfMissing: true
   }),
   secret: process.env.SESSION_SECRET,
   resave: false,

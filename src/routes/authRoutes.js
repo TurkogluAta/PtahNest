@@ -11,7 +11,7 @@ router.post('/register', registerValidation, async (req, res) => {
     const { username, email, password, deviceId, deviceFingerprint } = req.body;
 
     // Check if email or username already exists (case-insensitive)
-    const existing = userDb.findByEmailOrUsername(email) || userDb.findByEmailOrUsername(username);
+    const existing = await userDb.findByEmailOrUsername(email) || await userDb.findByEmailOrUsername(username);
     if (existing) {
       return res.status(409).json({
         success: false,
@@ -23,7 +23,7 @@ router.post('/register', registerValidation, async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 12);
 
     // Create user with hashed password
-    const user = userDb.create(username, email, hashedPassword);
+    const user = await userDb.create(username, email, hashedPassword);
 
     // Session fixation prevention: Generate new session ID
     req.session.regenerate((err) => {
@@ -60,7 +60,7 @@ router.post('/login', loginValidation, async (req, res) => {
 
     // Brute-force protection check (IP-based)
     const clientIp = req.ip || req.connection.remoteAddress;
-    const bruteForceCheck = loginAttemptDb.check(clientIp);
+    const bruteForceCheck = await loginAttemptDb.check(clientIp);
     if (!bruteForceCheck.allowed) {
       return res.status(429).json({
         success: false,
@@ -69,7 +69,7 @@ router.post('/login', loginValidation, async (req, res) => {
     }
 
     // Find user by email or username
-    const user = userDb.findByEmailOrUsername(identifier);
+    const user = await userDb.findByEmailOrUsername(identifier);
 
     // Timing attack prevention: Always run bcrypt.compare
     // Even if user doesn't exist, compare with dummy hash to keep timing constant
@@ -79,7 +79,7 @@ router.post('/login', loginValidation, async (req, res) => {
 
     if (!user || !isValidPassword) {
       // Record failed attempt (IP-based)
-      loginAttemptDb.record(clientIp);
+      await loginAttemptDb.record(clientIp);
 
       return res.status(401).json({
         success: false,
@@ -88,7 +88,7 @@ router.post('/login', loginValidation, async (req, res) => {
     }
 
     // Successful login - Clear IP's failed attempts
-    loginAttemptDb.clear(clientIp);
+    await loginAttemptDb.clear(clientIp);
 
     // Session fixation prevention: Generate new session ID
     req.session.regenerate((err) => {
@@ -140,7 +140,7 @@ router.post('/logout', (req, res) => {
 });
 
 // ME endpoint (get current user) - Protected route
-router.get('/me', (req, res) => {
+router.get('/me', async (req, res) => {
   // Check if user is authenticated
   if (!req.session.userId) {
     return res.status(401).json({
@@ -149,7 +149,7 @@ router.get('/me', (req, res) => {
     });
   }
 
-  const user = userDb.findById(req.session.userId);
+  const user = await userDb.findById(req.session.userId);
 
   if (!user) {
     return res.status(401).json({

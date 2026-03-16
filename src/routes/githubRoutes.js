@@ -83,14 +83,14 @@ router.get('/callback', requireAuth, async (req, res) => {
     const githubUser = await userResponse.json();
 
     // Check if this GitHub account is already linked to another user
-    const existingUser = githubDb.findByGithubId(githubUser.id);
+    const existingUser = await githubDb.findByGithubId(githubUser.id);
     if (existingUser && existingUser.id !== req.session.userId) {
       return res.redirect(`${redirectBase}?github=error&reason=already_linked`);
     }
 
     // Encrypt token and save to DB
     const encryptedToken = encrypt(accessToken);
-    githubDb.linkAccount(req.session.userId, githubUser.id, githubUser.login, encryptedToken);
+    await githubDb.linkAccount(req.session.userId, githubUser.id, githubUser.login, encryptedToken);
 
     res.redirect(`${redirectBase}?github=success`);
   } catch (error) {
@@ -100,8 +100,8 @@ router.get('/callback', requireAuth, async (req, res) => {
 });
 
 // GET /status - Get GitHub connection status
-router.get('/status', requireAuth, (req, res) => {
-  const info = githubDb.getGithubInfo(req.session.userId);
+router.get('/status', requireAuth, async (req, res) => {
+  const info = await githubDb.getGithubInfo(req.session.userId);
 
   if (info && info.github_id) {
     return res.json({
@@ -117,7 +117,7 @@ router.get('/status', requireAuth, (req, res) => {
 // GET /repos - List user's GitHub repositories
 router.get('/repos', requireAuth, async (req, res) => {
   try {
-    const info = githubDb.getGithubInfo(req.session.userId);
+    const info = await githubDb.getGithubInfo(req.session.userId);
 
     // Return empty array if GitHub not linked
     if (!info || !info.github_token) {
@@ -157,13 +157,13 @@ router.get('/repos', requireAuth, async (req, res) => {
 // GET /commits/:projectId - Fetch all commits for a project's GitHub repo
 router.get('/commits/:projectId', requireAuth, async (req, res) => {
   try {
-    const project = projectDb.findById(req.params.projectId);
+    const project = await projectDb.findById(req.params.projectId);
     if (!project) {
       return res.status(404).json({ success: false, message: 'Project not found' });
     }
 
     // Check if user is member or creator
-    if (project.creator_id !== req.session.userId && !memberDb.isMember(req.params.projectId, req.session.userId)) {
+    if (project.creator_id !== req.session.userId && !await memberDb.isMember(req.params.projectId, req.session.userId)) {
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
@@ -172,7 +172,7 @@ router.get('/commits/:projectId', requireAuth, async (req, res) => {
     }
 
     // Use the requesting user's own GitHub token (they are a collaborator on the repo)
-    const info = githubDb.getGithubInfo(req.session.userId);
+    const info = await githubDb.getGithubInfo(req.session.userId);
     if (!info || !info.github_token) {
       return res.status(403).json({ success: false, message: 'GitHub account not linked', githubRequired: true });
     }
@@ -232,19 +232,19 @@ router.get('/commits/:projectId', requireAuth, async (req, res) => {
 // Returns an object: { sent: true/false, autoAccepted?: true, error?: string }
 async function sendCollaboratorInvite(projectId, invitedUserId, githubRepo, creatorId) {
   // Check if invited user has a GitHub account linked
-  const invitedUser = githubDb.getGithubInfo(invitedUserId);
+  const invitedUser = await githubDb.getGithubInfo(invitedUserId);
   if (!invitedUser || !invitedUser.github_username) {
     return { sent: false, error: 'User has no GitHub account linked' };
   }
 
   // Check if creator has a GitHub token
-  const creatorGithub = githubDb.getGithubInfo(creatorId);
+  const creatorGithub = await githubDb.getGithubInfo(creatorId);
   if (!creatorGithub || !creatorGithub.github_token) {
     return { sent: false, error: 'Link your GitHub account first to send invites' };
   }
 
   // Rate limit: max 24 invites per project per 24 hours
-  const inviteCount = githubDb.getInviteCount(projectId, 24);
+  const inviteCount = await githubDb.getInviteCount(projectId, 24);
   if (inviteCount >= 24) {
     return { sent: false, error: 'Invite rate limit exceeded (24/24h). Try again later' };
   }
@@ -266,7 +266,7 @@ async function sendCollaboratorInvite(projectId, invitedUserId, githubRepo, crea
 
     if (ghResponse.status === 201) {
       // 201 = invite sent
-      githubDb.updateInviteStatus(projectId, invitedUserId, 1);
+      await githubDb.updateInviteStatus(projectId, invitedUserId, 1);
 
       // Auto-accept: use invited user's token to accept the invite
       try {
@@ -296,7 +296,7 @@ async function sendCollaboratorInvite(projectId, invitedUserId, githubRepo, crea
             );
 
             if (acceptRes.status === 204) {
-              githubDb.updateInviteStatus(projectId, invitedUserId, 2);
+              await githubDb.updateInviteStatus(projectId, invitedUserId, 2);
               return { sent: true, autoAccepted: true };
             }
           }
@@ -310,7 +310,7 @@ async function sendCollaboratorInvite(projectId, invitedUserId, githubRepo, crea
 
     } else if (ghResponse.status === 204) {
       // 204 = already a collaborator
-      githubDb.updateInviteStatus(projectId, invitedUserId, 2);
+      await githubDb.updateInviteStatus(projectId, invitedUserId, 2);
       return { sent: true, autoAccepted: true };
 
     } else {
@@ -325,15 +325,15 @@ async function sendCollaboratorInvite(projectId, invitedUserId, githubRepo, crea
 }
 
 // POST /unlink - Unlink GitHub account
-router.post('/unlink', requireAuth, (req, res) => {
-  const info = githubDb.getGithubInfo(req.session.userId);
+router.post('/unlink', requireAuth, async (req, res) => {
+  const info = await githubDb.getGithubInfo(req.session.userId);
 
   if (!info || !info.github_id) {
     return res.status(400).json({ success: false, message: 'No GitHub account linked' });
   }
 
   // Block unlink if user is creator of any active software project
-  const creatorProjects = projectDb.getActiveSoftwareProjectsAsCreator(req.session.userId);
+  const creatorProjects = await projectDb.getActiveSoftwareProjectsAsCreator(req.session.userId);
   if (creatorProjects.length > 0) {
     const names = creatorProjects.map(p => p.name).join(', ');
     return res.status(400).json({
@@ -343,7 +343,7 @@ router.post('/unlink', requireAuth, (req, res) => {
     });
   }
 
-  githubDb.unlinkAccount(req.session.userId);
+  await githubDb.unlinkAccount(req.session.userId);
   res.json({ success: true, message: 'GitHub account unlinked' });
 });
 

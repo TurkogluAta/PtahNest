@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { projectDb, userDb, memberDb, joinRequestDb, githubDb } = require('../models/database');
+const { projectDb, userDb, memberDb, joinRequestDb, githubDb, pool } = require('../models/database');
 const { sendCollaboratorInvite } = require('./githubRoutes');
 const {
   createProjectValidation,
@@ -31,7 +31,7 @@ router.post('/', requireAuth, createProjectValidation, async (req, res) => {
 
     // Software projects require GitHub to be linked
     if (typeValue === 'software') {
-      const githubInfo = githubDb.getGithubInfo(req.session.userId);
+      const githubInfo = await githubDb.getGithubInfo(req.session.userId);
       if (!githubInfo || !githubInfo.github_id) {
         return res.status(400).json({
           success: false,
@@ -42,7 +42,7 @@ router.post('/', requireAuth, createProjectValidation, async (req, res) => {
     }
 
     // Check if user already has an active project with the same name
-    if (projectDb.hasActiveDuplicateName(req.session.userId, name)) {
+    if (await projectDb.hasActiveDuplicateName(req.session.userId, name)) {
       return res.status(400).json({
         success: false,
         message: 'You already have an active project with this name'
@@ -50,7 +50,7 @@ router.post('/', requireAuth, createProjectValidation, async (req, res) => {
     }
 
     // Check if repo is already used by another active project
-    if (repoValue && projectDb.isRepoInUse(repoValue)) {
+    if (repoValue && await projectDb.isRepoInUse(repoValue)) {
       return res.status(400).json({
         success: false,
         message: 'This GitHub repository is already linked to another active project'
@@ -61,7 +61,7 @@ router.post('/', requireAuth, createProjectValidation, async (req, res) => {
     const recruitmentOpen = lookingFor.length > 0;
 
     // Create project
-    const project = projectDb.create(
+    const project = await projectDb.create(
       name,
       description,
       req.session.userId,
@@ -91,7 +91,7 @@ router.post('/', requireAuth, createProjectValidation, async (req, res) => {
 router.get('/', requireAuth, async (req, res) => {
   try {
     // Get all projects where user is creator OR member
-    const projects = projectDb.findUserProjects(req.session.userId);
+    const projects = await projectDb.findUserProjects(req.session.userId);
 
     res.json({
       success: true,
@@ -112,7 +112,7 @@ router.get('/discover', async (req, res) => {
   try {
     // Pass userId if logged in (to filter out projects user is already in)
     const userId = req.session.userId || null;
-    const projects = projectDb.findDiscoverProjects(userId);
+    const projects = await projectDb.findDiscoverProjects(userId);
 
     res.json({
       success: true,
@@ -131,7 +131,7 @@ router.get('/discover', async (req, res) => {
 // READ: Get single project by ID
 router.get('/:id', paramIdValidation, async (req, res) => {
   try {
-    const project = projectDb.findById(req.params.id);
+    const project = await projectDb.findById(req.params.id);
 
     if (!project) {
       return res.status(404).json({
@@ -141,7 +141,7 @@ router.get('/:id', paramIdValidation, async (req, res) => {
     }
 
     // Get creator username
-    const creator = userDb.findById(project.creator_id);
+    const creator = await userDb.findById(project.creator_id);
     project.creator_username = creator ? creator.username : 'Unknown';
 
     res.json({
@@ -165,7 +165,7 @@ router.put('/:id', requireAuth, paramIdValidation, updateProjectValidation, asyn
     const repoValue = githubRepo || null;
 
     // Check if repo is already used by another active project (exclude current project)
-    if (repoValue && projectDb.isRepoInUse(repoValue, req.params.id)) {
+    if (repoValue && await projectDb.isRepoInUse(repoValue, req.params.id)) {
       return res.status(400).json({
         success: false,
         message: 'This GitHub repository is already linked to another active project'
@@ -173,7 +173,7 @@ router.put('/:id', requireAuth, paramIdValidation, updateProjectValidation, asyn
     }
 
     // Update project (ownership check in projectDb.update)
-    const success = projectDb.update(req.params.id, req.session.userId, {
+    const success = await projectDb.update(req.params.id, req.session.userId, {
       name,
       description,
       tags,
@@ -206,7 +206,7 @@ router.put('/:id', requireAuth, paramIdValidation, updateProjectValidation, asyn
 // PATCH: Toggle recruitment status
 router.patch('/:id/recruitment', requireAuth, paramIdValidation, async (req, res) => {
   try {
-    const success = projectDb.toggleRecruitment(req.params.id, req.session.userId);
+    const success = await projectDb.toggleRecruitment(req.params.id, req.session.userId);
 
     if (!success) {
       return res.status(404).json({
@@ -215,7 +215,7 @@ router.patch('/:id/recruitment', requireAuth, paramIdValidation, async (req, res
       });
     }
 
-    const project = projectDb.findById(req.params.id);
+    const project = await projectDb.findById(req.params.id);
 
     res.json({
       success: true,
@@ -235,7 +235,7 @@ router.patch('/:id/recruitment', requireAuth, paramIdValidation, async (req, res
 // DELETE: Delete project
 router.delete('/:id', requireAuth, paramIdValidation, async (req, res) => {
   try {
-    const success = projectDb.delete(req.params.id, req.session.userId);
+    const success = await projectDb.delete(req.params.id, req.session.userId);
 
     if (!success) {
       return res.status(404).json({
@@ -266,7 +266,7 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
     const { message } = req.body;
 
     // Check if project exists
-    const project = projectDb.findById(projectId);
+    const project = await projectDb.findById(projectId);
     if (!project) {
       return res.status(404).json({
         success: false,
@@ -284,7 +284,7 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
 
     // Software projects require GitHub to be linked
     if (project.projectType === 'software') {
-      const githubInfo = githubDb.getGithubInfo(userId);
+      const githubInfo = await githubDb.getGithubInfo(userId);
       if (!githubInfo || !githubInfo.github_id) {
         return res.status(400).json({
           success: false,
@@ -295,7 +295,7 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
     }
 
     // Check if user is already a member
-    if (memberDb.isMember(projectId, userId)) {
+    if (await memberDb.isMember(projectId, userId)) {
       return res.status(400).json({
         success: false,
         message: 'You are already a member of this project'
@@ -303,11 +303,11 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
     }
 
     // Check if user has left or been kicked
-    const { db } = require('../models/database');
-    const pastMembership = db.prepare(`
-      SELECT membership_status FROM project_members
-      WHERE project_id = ? AND user_id = ? AND membership_status IN ('left', 'kicked')
-    `).get(projectId, userId);
+    const { rows: pastRows } = await pool.query(
+      `SELECT membership_status FROM project_members WHERE project_id = $1 AND user_id = $2 AND membership_status IN ('left', 'kicked')`,
+      [projectId, userId]
+    );
+    const pastMembership = pastRows[0] || null;
 
     if (pastMembership) {
       const message = pastMembership.membership_status === 'kicked'
@@ -321,7 +321,7 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
     }
 
     // Check if user already has a pending request
-    if (joinRequestDb.hasPendingRequest(projectId, userId)) {
+    if (await joinRequestDb.hasPendingRequest(projectId, userId)) {
       return res.status(400).json({
         success: false,
         message: 'You already have a pending request for this project'
@@ -329,7 +329,7 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
     }
 
     // Check if user was recently rejected (within 30 days)
-    const rejectionCheck = joinRequestDb.wasRecentlyRejected(projectId, userId);
+    const rejectionCheck = await joinRequestDb.wasRecentlyRejected(projectId, userId);
     if (rejectionCheck.blocked) {
       return res.status(400).json({
         success: false,
@@ -338,14 +338,13 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
     }
 
     // If there's an old rejected request (>30 days), delete it before creating new one
-    const stmt = require('../models/database').db.prepare(`
-      DELETE FROM join_requests
-      WHERE project_id = ? AND user_id = ? AND status = 'rejected'
-    `);
-    stmt.run(projectId, userId);
+    await pool.query(
+      `DELETE FROM join_requests WHERE project_id = $1 AND user_id = $2 AND status = 'rejected'`,
+      [projectId, userId]
+    );
 
     // Create join request
-    const joinRequest = joinRequestDb.create(projectId, userId, message);
+    const joinRequest = await joinRequestDb.create(projectId, userId, message);
 
     res.status(201).json({
       success: true,
@@ -369,7 +368,7 @@ router.get('/:id/requests', requireAuth, paramIdValidation, async (req, res) => 
     const userId = req.session.userId;
 
     // Check if project exists
-    const project = projectDb.findById(projectId);
+    const project = await projectDb.findById(projectId);
     if (!project) {
       return res.status(404).json({
         success: false,
@@ -385,7 +384,7 @@ router.get('/:id/requests', requireAuth, paramIdValidation, async (req, res) => 
       });
     }
 
-    const requests = joinRequestDb.getPendingRequests(projectId);
+    const requests = await joinRequestDb.getPendingRequests(projectId);
 
     res.json({
       success: true,
@@ -410,7 +409,7 @@ router.patch('/:id/requests/:requestId', requireAuth, paramIdValidation, paramRe
     const { action } = req.body; // 'accept' or 'reject'
 
     // Check if project exists
-    const project = projectDb.findById(projectId);
+    const project = await projectDb.findById(projectId);
     if (!project) {
       return res.status(404).json({
         success: false,
@@ -427,7 +426,7 @@ router.patch('/:id/requests/:requestId', requireAuth, paramIdValidation, paramRe
     }
 
     // Get join request
-    const joinRequest = joinRequestDb.findById(requestId);
+    const joinRequest = await joinRequestDb.findById(requestId);
     if (!joinRequest) {
       return res.status(404).json({
         success: false,
@@ -445,8 +444,8 @@ router.patch('/:id/requests/:requestId', requireAuth, paramIdValidation, paramRe
 
     if (action === 'accept') {
       // Accept request and add user as member
-      joinRequestDb.accept(requestId);
-      memberDb.addMember(projectId, joinRequest.user_id, 'member');
+      await joinRequestDb.accept(requestId);
+      await memberDb.addMember(projectId, joinRequest.user_id, 'member');
 
       // Send GitHub collaborator invite if project has a linked repo
       const githubInvite = project.github_repo
@@ -460,7 +459,7 @@ router.patch('/:id/requests/:requestId', requireAuth, paramIdValidation, paramRe
       });
     } else if (action === 'reject') {
       // Reject request
-      joinRequestDb.reject(requestId);
+      await joinRequestDb.reject(requestId);
 
       res.json({
         success: true,
@@ -489,7 +488,7 @@ router.get('/:id/members', requireAuth, paramIdValidation, async (req, res) => {
     const userId = req.session.userId;
 
     // Check if project exists
-    const project = projectDb.findById(projectId);
+    const project = await projectDb.findById(projectId);
     if (!project) {
       return res.status(404).json({
         success: false,
@@ -498,14 +497,14 @@ router.get('/:id/members', requireAuth, paramIdValidation, async (req, res) => {
     }
 
     // Check if user is member or creator
-    if (project.creator_id !== userId && !memberDb.isMember(projectId, userId)) {
+    if (project.creator_id !== userId && !await memberDb.isMember(projectId, userId)) {
       return res.status(403).json({
         success: false,
         message: 'You must be a member to view project members'
       });
     }
 
-    const members = memberDb.getProjectMembers(projectId);
+    const members = await memberDb.getProjectMembers(projectId);
 
     res.json({
       success: true,
@@ -529,7 +528,7 @@ router.delete('/:id/leave', requireAuth, paramIdValidation, async (req, res) => 
     const userId = req.session.userId;
 
     // Check if project exists
-    const project = projectDb.findById(projectId);
+    const project = await projectDb.findById(projectId);
     if (!project) {
       return res.status(404).json({
         success: false,
@@ -546,7 +545,7 @@ router.delete('/:id/leave', requireAuth, paramIdValidation, async (req, res) => 
     }
 
     // Check if user is member
-    if (!memberDb.isMember(projectId, userId)) {
+    if (!await memberDb.isMember(projectId, userId)) {
       return res.status(400).json({
         success: false,
         message: 'You are not a member of this project'
@@ -554,7 +553,7 @@ router.delete('/:id/leave', requireAuth, paramIdValidation, async (req, res) => 
     }
 
     // Remove member
-    memberDb.removeMember(projectId, userId);
+    await memberDb.removeMember(projectId, userId);
 
     res.json({
       success: true,
