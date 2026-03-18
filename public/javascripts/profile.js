@@ -105,7 +105,9 @@ async function unlinkGithub() {
     }
 }
 
-// Init
-checkGithubCallback();
-loadUserProfile();
-loadGithubStatus();
+// Init — load data, then reveal content
+(async function initProfile() {
+    checkGithubCallback();
+    await Promise.all([loadUserProfile(), loadGithubStatus()]);
+    showMainContent();
+})();

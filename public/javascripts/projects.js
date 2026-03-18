@@ -6,13 +6,23 @@ const PROJECT_TYPES = {
 
 // State
 let projects = [];
-let allJoinRequests = [];
 let githubLinked = false;
 
 // Pagination state
 const PROJECTS_PER_PAGE = 4;
 let currentPage = 1;
 let currentTab = 'active'; // 'active' or 'past'
+
+// Check if we should auto-open edit modal from URL param
+function checkEditParam() {
+    const params = new URLSearchParams(window.location.search);
+    const editId = params.get('edit');
+    if (editId) {
+        // Clean URL without reloading
+        window.history.replaceState({}, '', window.location.pathname);
+        openEditModal(editId);
+    }
+}
 
 // Fetch projects on page load
 async function fetchProjects() {
@@ -30,8 +40,8 @@ async function fetchProjects() {
         projects = data.projects;
         renderProjects();
 
-        // Fetch join requests after projects are loaded
-        await fetchJoinRequests();
+        // Auto-open edit modal if redirected from project detail page
+        checkEditParam();
 
     } catch (error) {
         console.error('Fetch projects error:', error);
@@ -49,7 +59,8 @@ function getBadgeClass(status) {
         'active': 'badge-success',
         'completed': 'badge-completed',
         'left': 'badge-left',
-        'kicked': 'badge-kicked'
+        'kicked': 'badge-kicked',
+        'deleted': 'badge-deleted'
     };
     return badges[status] || 'badge-success';
 }
@@ -60,7 +71,8 @@ function getBadgeText(status) {
         'active': 'Active',
         'completed': 'Completed',
         'left': 'Left',
-        'kicked': 'Kicked Out'
+        'kicked': 'Kicked Out',
+        'deleted': 'Deleted'
     };
     return texts[status] || 'Active';
 }
@@ -69,6 +81,11 @@ function getBadgeText(status) {
 function renderProjectCard(project) {
     const tagsHTML = project.tags && project.tags.length > 0
         ? `<div class="project-tags">${project.tags.map(tag => `<span class="project-tag">${tag}</span>`).join('')}</div>`
+        : '';
+
+    // Repo badge for software projects with a linked GitHub repo
+    const repoTagHTML = project.projectType === 'software' && project.githubRepo
+        ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14">${project.githubRepo}</span>`
         : '';
 
     const lookingForHTML = project.lookingFor && project.lookingFor.length > 0
@@ -86,6 +103,8 @@ function renderProjectCard(project) {
                     <div class="card-desc no-margin">${project.description}</div>
                 </div>
                 <div class="badge-group">
+                    ${project.status === 'completed' && project.role === 'creator' ? '<img src="../pictures/icons/purple-star.svg" width="20" height="20" title="Project Creator">' : ''}
+                    ${repoTagHTML}
                     ${(() => { const t = PROJECT_TYPES[project.projectType] || PROJECT_TYPES.software; return `<span class="badge ${t.badgeClass}">${t.label}</span>`; })()}
                     <span class="badge ${getBadgeClass(project.status)}">${getBadgeText(project.status)}</span>
                 </div>
@@ -176,7 +195,7 @@ function renderProjects() {
         emptyMessage = 'No active projects yet. Create one to get started!';
     } else {
         filteredProjects = projects.filter(p =>
-            p.status === 'completed' || p.status === 'left' || p.status === 'kicked'
+            p.status === 'completed' || p.status === 'left' || p.status === 'kicked' || p.status === 'deleted'
         );
         container = pastContainer;
         emptyMessage = 'No past projects.';
@@ -312,7 +331,7 @@ document.getElementById('createProjectForm').addEventListener('submit', async (e
                 }
                 return;
             }
-            alert(data.message || 'Failed to create project');
+            showToast(data.message || 'Failed to create project', 'error');
             return;
         }
 
@@ -345,219 +364,13 @@ document.getElementById('createProjectForm').addEventListener('submit', async (e
 
     } catch (error) {
         console.error('Create project error:', error);
-        alert('Failed to create project. Please try again.');
+        showToast('Failed to create project. Please try again.', 'error');
     }
 });
 
 // Tab button event listeners
 document.getElementById('activeTab').addEventListener('click', () => switchTab('active'));
 document.getElementById('pastTab').addEventListener('click', () => switchTab('past'));
-
-// ========================================
-// JOIN REQUEST MANAGEMENT
-// ========================================
-
-// Fetch all join requests for user's projects
-async function fetchJoinRequests() {
-    try {
-        // Get all active projects
-        const activeProjects = projects.filter(p => p.status === 'active');
-
-        // Fetch requests for each project
-        const requestsPromises = activeProjects.map(async (project) => {
-            try {
-                const response = await fetch(`/api/projects/${project.id}/requests`, {
-                    method: 'GET',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    return data.requests.map(req => ({
-                        ...req,
-                        projectName: project.name,
-                        projectId: project.id
-                    }));
-                }
-                return [];
-            } catch (error) {
-                console.error(`Failed to fetch requests for project ${project.id}:`, error);
-                return [];
-            }
-        });
-
-        const results = await Promise.all(requestsPromises);
-        allJoinRequests = results.flat();
-
-        // Update badge
-        updateRequestsBadge();
-
-    } catch (error) {
-        console.error('Fetch join requests error:', error);
-    }
-}
-
-// Update requests badge
-function updateRequestsBadge() {
-    const badge = document.getElementById('requestsBadge');
-    const btn = document.getElementById('joinRequestsBtn');
-
-    if (allJoinRequests.length > 0) {
-        badge.textContent = allJoinRequests.length;
-        btn.style.display = 'block';
-    } else {
-        btn.style.display = 'none';
-    }
-}
-
-// Render join requests in modal
-function renderJoinRequests() {
-    const container = document.getElementById('requestsContainer');
-
-    if (allJoinRequests.length === 0) {
-        container.innerHTML = `
-            <div class="card card-centered">
-                <p class="text-muted">No pending join requests</p>
-            </div>
-        `;
-        return;
-    }
-
-    const requestsHTML = allJoinRequests.map(req => `
-        <div class="request-card">
-            <div class="request-header">
-                <div>
-                    <div class="request-user">${req.username}</div>
-                    <div class="request-project">Project: ${req.projectName}</div>
-                    <div class="request-time">${formatDate(req.created_at)}</div>
-                </div>
-            </div>
-            ${req.message ? `<p class="card-desc">${req.message}</p>` : ''}
-            <div class="request-actions">
-                <button class="btn btn-primary" onclick="acceptRequest('${req.id}', '${req.projectId}')">
-                    Accept
-                </button>
-                <button class="btn btn-outline" onclick="rejectRequest('${req.id}', '${req.projectId}')">
-                    Reject
-                </button>
-            </div>
-        </div>
-    `).join('');
-
-    container.innerHTML = requestsHTML;
-}
-
-// Format date helper
-function formatDate(dateString) {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diff = now - date;
-    const seconds = Math.floor(diff / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-
-    if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
-    if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-    if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
-    return 'Just now';
-}
-
-// Open requests modal
-function openRequestsModal() {
-    renderJoinRequests();
-    document.getElementById('requestsModal').style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-}
-
-// Close requests modal
-function closeRequestsModal() {
-    document.getElementById('requestsModal').style.display = 'none';
-    document.body.style.overflow = 'auto';
-}
-
-// Accept request
-async function acceptRequest(requestId, projectId) {
-    try {
-        const response = await fetch(`/api/projects/${projectId}/requests/${requestId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'accept' })
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            // Build message based on GitHub invite result
-            let msg = 'Request accepted! User added to project.';
-            if (data.githubInvite) {
-                if (data.githubInvite.sent && data.githubInvite.autoAccepted) {
-                    msg = 'Request accepted! User added to project and GitHub repo.';
-                } else if (data.githubInvite.sent) {
-                    msg = 'Request accepted! User added to project. GitHub repo invite sent (pending acceptance).';
-                } else {
-                    msg = `Request accepted! User added to project. GitHub invite failed: ${data.githubInvite.error}`;
-                }
-            }
-            alert(msg);
-            // Remove from list
-            allJoinRequests = allJoinRequests.filter(r => r.id !== requestId);
-            updateRequestsBadge();
-            renderJoinRequests();
-        } else {
-            alert(data.message || 'Failed to accept request');
-        }
-
-    } catch (error) {
-        console.error('Accept request error:', error);
-        alert('Failed to accept request. Please try again.');
-    }
-}
-
-// Reject request
-async function rejectRequest(requestId, projectId) {
-    try {
-        const response = await fetch(`/api/projects/${projectId}/requests/${requestId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'reject' })
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            alert('Request rejected.');
-            // Remove from list
-            allJoinRequests = allJoinRequests.filter(r => r.id !== requestId);
-            updateRequestsBadge();
-            renderJoinRequests();
-        } else {
-            alert(data.message || 'Failed to reject request');
-        }
-
-    } catch (error) {
-        console.error('Reject request error:', error);
-        alert('Failed to reject request. Please try again.');
-    }
-}
-
-// Event listeners for join requests modal
-document.getElementById('joinRequestsBtn').addEventListener('click', openRequestsModal);
-document.getElementById('closeRequestsModal').addEventListener('click', closeRequestsModal);
-
-// Close modal on backdrop click
-document.getElementById('requestsModal').addEventListener('click', (e) => {
-    if (e.target.id === 'requestsModal') {
-        closeRequestsModal();
-    }
-});
-
-// Close modal with Escape key
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && document.getElementById('requestsModal').style.display === 'flex') {
-        closeRequestsModal();
-    }
-});
 
 // ========================================
 // GITHUB REPO SLIDE BOX
@@ -686,6 +499,244 @@ async function loadGithubRepos() {
     }
 }
 
-// Fetch projects on page load
-fetchProjects();
-loadGithubRepos();
+// ========================================
+// EDIT PROJECT MODAL
+// ========================================
+let editSelectedTags = new Set();
+const editTagButtons = document.querySelectorAll('.edit-tag-btn');
+
+// Edit tag button click handlers
+editTagButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+        const tag = btn.getAttribute('data-tag');
+        if (editSelectedTags.has(tag)) {
+            editSelectedTags.delete(tag);
+            btn.classList.remove('active');
+        } else {
+            editSelectedTags.add(tag);
+            btn.classList.add('active');
+        }
+    });
+});
+
+// Edit recruitment toggle
+document.querySelectorAll('.edit-recruit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.edit-recruit-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('editRecruitmentOpen').value = btn.dataset.recruit;
+    });
+});
+
+// Open edit modal and populate with project data
+function openEditModal(projectId) {
+    const project = projects.find(p => p.id === projectId);
+    if (!project) return;
+
+    // Block editing non-active projects
+    if (project.status !== 'active') return;
+
+    // Set project ID
+    document.getElementById('editProjectId').value = project.id;
+
+    // Set name and description
+    document.getElementById('editProjectName').value = project.name;
+    document.getElementById('editProjectDescription').value = project.description;
+
+    // Project type and github repo are immutable — just preserve values
+    const isSoftware = (project.projectType || 'software') === 'software';
+    document.getElementById('editProjectType').value = project.projectType || 'software';
+    document.getElementById('editGithubRepo').value = project.githubRepo || '';
+
+    // Show/hide sections based on type
+    document.getElementById('editLookingForGroup').style.display = isSoftware ? 'block' : 'none';
+    document.getElementById('editPresetTagsGroup').style.display = isSoftware ? 'flex' : 'none';
+
+    // Set tags — separate preset tags from custom tags
+    const presetTagNames = ['Frontend', 'Backend', 'Mobile', 'Design', 'AI/ML', 'DevOps'];
+    editSelectedTags.clear();
+    const customTags = [];
+
+    (project.tags || []).forEach(tag => {
+        if (presetTagNames.includes(tag)) {
+            editSelectedTags.add(tag);
+        } else {
+            customTags.push(tag);
+        }
+    });
+
+    editTagButtons.forEach(btn => {
+        btn.classList.toggle('active', editSelectedTags.has(btn.dataset.tag));
+    });
+    document.getElementById('editCustomTags').value = customTags.join(', ');
+
+    // Set looking for roles
+    document.querySelectorAll('.edit-role-checkbox').forEach(cb => {
+        cb.checked = (project.lookingFor || []).includes(cb.value);
+    });
+
+    // Set recruitment status
+    const isOpen = project.recruitmentOpen !== false;
+    document.getElementById('editRecruitmentOpen').value = isOpen ? 'true' : 'false';
+    document.querySelectorAll('.edit-recruit-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.recruit === String(isOpen));
+    });
+
+    // Show complete/delete buttons only for creator
+    const deleteSection = document.getElementById('editDeleteSection');
+    deleteSection.style.display = project.role === 'creator' ? 'block' : 'none';
+
+    // Hide complete button if project is not active
+    const completeBtn = document.getElementById('editCompleteBtn');
+    completeBtn.style.display = project.status === 'active' ? 'block' : 'none';
+
+    // Set up delete confirmation — show project name hint, reset input
+    document.getElementById('deleteProjectNameHint').textContent = project.name;
+    document.getElementById('deleteConfirmInput').value = '';
+    document.getElementById('editDeleteBtn').disabled = true;
+
+    // Show modal
+    document.getElementById('editModal').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+}
+
+// Close edit modal
+function closeEditModal() {
+    document.getElementById('editModal').style.display = 'none';
+    document.body.style.overflow = 'auto';
+}
+
+document.getElementById('closeEditModal').addEventListener('click', closeEditModal);
+document.getElementById('cancelEditBtn').addEventListener('click', closeEditModal);
+
+// Close on backdrop click
+document.getElementById('editModal').addEventListener('click', (e) => {
+    if (e.target.id === 'editModal') closeEditModal();
+});
+
+// Close on Escape
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('editModal').style.display === 'flex') {
+        closeEditModal();
+    }
+});
+
+// Complete project from edit modal
+document.getElementById('editCompleteBtn').addEventListener('click', async () => {
+    const projectId = document.getElementById('editProjectId').value;
+    if (!confirm('Mark this project as completed? Members will remain but recruitment will close.')) return;
+
+    try {
+        const response = await fetch(`/api/projects/${projectId}/complete`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            closeEditModal();
+            // Update local state
+            const idx = projects.findIndex(p => p.id === projectId);
+            if (idx !== -1) {
+                projects[idx].status = 'completed';
+                projects[idx].recruitmentOpen = false;
+            }
+            renderProjects();
+        } else {
+            showToast(data.message || 'Failed to complete project', 'error');
+        }
+    } catch (error) {
+        console.error('Complete project error:', error);
+        showToast('Failed to complete project. Please try again.', 'error');
+    }
+});
+
+// Enable/disable delete button based on name confirmation input
+document.getElementById('deleteConfirmInput').addEventListener('input', (e) => {
+    const expected = document.getElementById('deleteProjectNameHint').textContent;
+    document.getElementById('editDeleteBtn').disabled = e.target.value !== expected;
+});
+
+// Delete project from edit modal
+document.getElementById('editDeleteBtn').addEventListener('click', async () => {
+    const projectId = document.getElementById('editProjectId').value;
+
+    try {
+        const response = await fetch(`/api/projects/${projectId}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            closeEditModal();
+            // Update local state — mark as deleted
+            const idx = projects.findIndex(p => p.id === projectId);
+            if (idx !== -1) projects[idx].status = 'deleted';
+            renderProjects();
+        } else {
+            showToast(data.message || 'Failed to delete project', 'error');
+        }
+    } catch (error) {
+        console.error('Delete project error:', error);
+        showToast('Failed to delete project. Please try again.', 'error');
+    }
+});
+
+// Handle edit form submission
+document.getElementById('editProjectForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const projectId = document.getElementById('editProjectId').value;
+    const name = document.getElementById('editProjectName').value.trim();
+    const description = document.getElementById('editProjectDescription').value.trim();
+    const projectType = document.getElementById('editProjectType').value;
+
+    // Collect tags
+    const customTagsInput = document.getElementById('editCustomTags').value.trim();
+    const customTags = customTagsInput ? customTagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
+    const tags = [...Array.from(editSelectedTags), ...customTags];
+
+    // Collect roles
+    const roleCheckboxes = document.querySelectorAll('.edit-role-checkbox:checked');
+    const lookingFor = Array.from(roleCheckboxes).map(cb => cb.value);
+
+    const githubRepo = document.getElementById('editGithubRepo').value || null;
+    const recruitmentOpen = document.getElementById('editRecruitmentOpen').value === 'true';
+
+    try {
+        const response = await fetch(`/api/projects/${projectId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, description, tags, lookingFor, recruitmentOpen, githubRepo, projectType })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            showToast(data.message || 'Failed to update project', 'error');
+            return;
+        }
+
+        // Update local project data
+        const idx = projects.findIndex(p => p.id === projectId);
+        if (idx !== -1) {
+            projects[idx] = { ...projects[idx], name, description, tags, lookingFor, recruitmentOpen, githubRepo, projectType };
+        }
+
+        closeEditModal();
+        renderProjects();
+
+    } catch (error) {
+        console.error('Update project error:', error);
+        showToast('Failed to update project. Please try again.', 'error');
+    }
+});
+
+// Fetch projects on page load, then reveal content
+(async function initProjects() {
+    await Promise.all([fetchProjects(), loadGithubRepos()]);
+    showMainContent();
+})();

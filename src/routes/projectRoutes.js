@@ -1,14 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { projectDb, userDb, memberDb, joinRequestDb, githubDb, pool } = require('../models/database');
-const { sendCollaboratorInvite } = require('./githubRoutes');
+const { sendCollaboratorInvite, createGithubRepo, removeGithubCollaborator } = require('./githubRoutes');
 const {
   createProjectValidation,
   updateProjectValidation,
   joinRequestValidation,
   manageRequestValidation,
   paramIdValidation,
-  paramRequestIdValidation
+  paramRequestIdValidation,
+  paramMemberIdValidation
 } = require('../middleware/validators');
 
 // Middleware: Check if user is authenticated
@@ -26,7 +27,7 @@ function requireAuth(req, res, next) {
 router.post('/', requireAuth, createProjectValidation, async (req, res) => {
   try {
     const { name, description, tags, lookingFor, githubRepo, projectType } = req.body;
-    const repoValue = githubRepo || null;
+    let repoValue = githubRepo || null;
     const typeValue = projectType || 'software';
 
     // Software projects require GitHub to be linked
@@ -49,6 +50,24 @@ router.post('/', requireAuth, createProjectValidation, async (req, res) => {
       });
     }
 
+    // Auto-create GitHub repo if software project and no repo selected
+    if (typeValue === 'software' && !repoValue) {
+      const repoResult = await createGithubRepo(req.session.userId, name);
+      if (!repoResult.success) {
+        if (repoResult.error === 'duplicate') {
+          return res.status(400).json({
+            success: false,
+            message: 'A GitHub repository with this name already exists on your account'
+          });
+        }
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to create GitHub repository'
+        });
+      }
+      repoValue = repoResult.fullName;
+    }
+
     // Check if repo is already used by another active project
     if (repoValue && await projectDb.isRepoInUse(repoValue)) {
       return res.status(400).json({
@@ -57,8 +76,8 @@ router.post('/', requireAuth, createProjectValidation, async (req, res) => {
       });
     }
 
-    // Auto-set recruitment status
-    const recruitmentOpen = lookingFor.length > 0;
+    // New projects always start with recruitment open
+    const recruitmentOpen = true;
 
     // Create project
     const project = await projectDb.create(
@@ -131,7 +150,8 @@ router.get('/discover', async (req, res) => {
 // READ: Get single project by ID
 router.get('/:id', paramIdValidation, async (req, res) => {
   try {
-    const project = await projectDb.findById(req.params.id);
+    const userId = req.session.userId || null;
+    const project = await projectDb.findById(req.params.id, userId);
 
     if (!project) {
       return res.status(404).json({
@@ -161,25 +181,16 @@ router.get('/:id', paramIdValidation, async (req, res) => {
 // UPDATE: Update project
 router.put('/:id', requireAuth, paramIdValidation, updateProjectValidation, async (req, res) => {
   try {
-    const { name, description, tags, lookingFor, recruitmentOpen, githubRepo } = req.body;
-    const repoValue = githubRepo || null;
-
-    // Check if repo is already used by another active project (exclude current project)
-    if (repoValue && await projectDb.isRepoInUse(repoValue, req.params.id)) {
-      return res.status(400).json({
-        success: false,
-        message: 'This GitHub repository is already linked to another active project'
-      });
-    }
+    const { name, description, tags, lookingFor, recruitmentOpen } = req.body;
 
     // Update project (ownership check in projectDb.update)
+    // github_repo and project_type are immutable after creation
     const success = await projectDb.update(req.params.id, req.session.userId, {
       name,
       description,
       tags,
       lookingFor,
-      recruitmentOpen,
-      githubRepo: repoValue
+      recruitmentOpen
     });
 
     if (!success) {
@@ -225,6 +236,32 @@ router.patch('/:id/recruitment', requireAuth, paramIdValidation, async (req, res
 
   } catch (error) {
     console.error('Toggle recruitment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+
+// COMPLETE: Mark project as completed (creator only)
+router.patch('/:id/complete', requireAuth, paramIdValidation, async (req, res) => {
+  try {
+    const success = await projectDb.complete(req.params.id, req.session.userId);
+
+    if (!success) {
+      return res.status(404).json({
+        success: false,
+        message: 'Project not found, unauthorized, or already completed'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Project marked as completed'
+    });
+
+  } catch (error) {
+    console.error('Complete project error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error'
@@ -283,6 +320,7 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
     }
 
     // Software projects require GitHub to be linked
+    let snapshotGithubId = null;
     if (project.projectType === 'software') {
       const githubInfo = await githubDb.getGithubInfo(userId);
       if (!githubInfo || !githubInfo.github_id) {
@@ -292,6 +330,7 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
           githubRequired: true
         });
       }
+      snapshotGithubId = githubInfo.github_id;
     }
 
     // Check if user is already a member
@@ -343,8 +382,8 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
       [projectId, userId]
     );
 
-    // Create join request
-    const joinRequest = await joinRequestDb.create(projectId, userId, message);
+    // Create join request (snapshot github_id for software projects)
+    const joinRequest = await joinRequestDb.create(projectId, userId, message, snapshotGithubId);
 
     res.status(201).json({
       success: true,
@@ -443,13 +482,13 @@ router.patch('/:id/requests/:requestId', requireAuth, paramIdValidation, paramRe
     }
 
     if (action === 'accept') {
-      // Accept request and add user as member
+      // Accept request and add user as member (pass snapshot github_id)
       await joinRequestDb.accept(requestId);
-      await memberDb.addMember(projectId, joinRequest.user_id, 'member');
+      await memberDb.addMember(projectId, joinRequest.user_id, 'member', joinRequest.github_id || null);
 
-      // Send GitHub collaborator invite if project has a linked repo
+      // Send GitHub collaborator invite if software project has a linked repo
       const githubInvite = project.github_repo
-        ? await sendCollaboratorInvite(projectId, joinRequest.user_id, project.github_repo, project.creator_id)
+        ? await sendCollaboratorInvite(projectId, joinRequest.user_id, project.github_repo, project.creator_id, joinRequest.github_id || null)
         : null;
 
       res.json({
@@ -518,6 +557,48 @@ router.get('/:id/members', requireAuth, paramIdValidation, async (req, res) => {
       success: false,
       message: 'Server error'
     });
+  }
+});
+
+// DELETE: Kick member from project (creator only)
+router.delete('/:id/members/:memberId', requireAuth, paramIdValidation, paramMemberIdValidation, async (req, res) => {
+  try {
+    const projectId = req.params.id;
+    const memberId = req.params.memberId;
+    const userId = req.session.userId;
+
+    // Check if project exists and is active
+    const project = await projectDb.findById(projectId);
+    if (!project || project.project_status !== 'active') {
+      return res.status(404).json({ success: false, message: 'Project not found or not active' });
+    }
+
+    // Only creator can kick members
+    if (project.creator_id !== userId) {
+      return res.status(403).json({ success: false, message: 'Only project creator can kick members' });
+    }
+
+    // Kick the member
+    const kickResult = await memberDb.kickMember(projectId, memberId);
+    if (!kickResult) {
+      return res.status(400).json({ success: false, message: 'Member not found or cannot be kicked' });
+    }
+
+    // Remove GitHub collaborator for software projects
+    let githubRemoval = null;
+    if (project.projectType === 'software' && project.github_repo && kickResult.githubId) {
+      githubRemoval = await removeGithubCollaborator(kickResult.githubId, project.github_repo, project.creator_id);
+    }
+
+    res.json({
+      success: true,
+      message: 'Member has been kicked from the project',
+      githubRemoval
+    });
+
+  } catch (error) {
+    console.error('Kick member error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 

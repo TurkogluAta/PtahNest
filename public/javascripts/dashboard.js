@@ -1,3 +1,9 @@
+// Project type definitions — add new types here only
+const PROJECT_TYPES = {
+  software: { label: 'Software', badgeClass: 'badge-type-software' },
+  research: { label: 'Research', badgeClass: 'badge-type-research' },
+};
+
 // Fetch and render user projects
 async function fetchUserProjects() {
     try {
@@ -13,8 +19,11 @@ async function fetchUserProjects() {
         const data = await response.json();
         const projects = data.projects || [];
 
-        // Limit to 4 projects for dashboard preview
-        const previewProjects = projects.slice(0, 4);
+        // Update dashboard stats from real data
+        updateDashboardStats(projects);
+
+        // Only show active projects on dashboard
+        const previewProjects = projects.filter(p => p.status === 'active').slice(0, 4);
 
         renderProjects(previewProjects);
     } catch (error) {
@@ -22,29 +31,6 @@ async function fetchUserProjects() {
     }
 }
 
-// Fetch and render discover projects
-async function fetchDiscoverProjects() {
-    try {
-        const response = await fetch('/api/projects/discover', {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-        });
-
-        if (!response.ok) {
-            throw new Error('Failed to fetch discover projects');
-        }
-
-        const data = await response.json();
-        const projects = data.projects || [];
-
-        // Limit to 3 projects for dashboard preview
-        const previewProjects = projects.slice(0, 3);
-
-        renderDiscoverProjects(previewProjects);
-    } catch (error) {
-        console.error('Fetch discover projects error:', error);
-    }
-}
 
 // Render user projects
 function renderProjects(projects) {
@@ -58,17 +44,23 @@ function renderProjects(projects) {
     }
 
     const projectsHTML = projects.map(project => {
-        const badgeClass = getBadgeClass(project.status);
-        const badgeText = getBadgeText(project.status);
+        // Repo badge for software projects
+        const repoTagHTML = project.projectType === 'software' && project.githubRepo
+            ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14">${project.githubRepo}</span>`
+            : '';
 
         return `
-            <div class="card card-hover card-bottom-gap">
+            <div class="card card-hover card-bottom-gap card-clickable" onclick="window.location.href='/pages/project-detail.html?id=${project.id}'">
                 <div class="project-card-header">
                     <div>
                         <div class="card-title">${project.name}</div>
                         <div class="card-desc no-margin">${project.description}</div>
                     </div>
-                    <span class="badge ${badgeClass}">${badgeText}</span>
+                    <div class="badge-group">
+                        ${repoTagHTML}
+                        ${(() => { const t = PROJECT_TYPES[project.projectType] || PROJECT_TYPES.software; return `<span class="badge ${t.badgeClass}">${t.label}</span>`; })()}
+                        <span class="badge ${getBadgeClass(project.status)}">${getBadgeText(project.status)}</span>
+                    </div>
                 </div>
                 <div class="project-meta">
                     <span class="meta-inline">
@@ -83,34 +75,18 @@ function renderProjects(projects) {
     container.innerHTML = projectsHTML;
 }
 
-// Render discover projects
-function renderDiscoverProjects(projects) {
-    const grid = document.getElementById('discoverProjectsContainer');
 
-    if (!grid) return;
+// Update purple star count and projects finished from real data
+function updateDashboardStats(projects) {
+    // Purple stars = completed projects where user is the creator
+    const purpleStarCount = projects.filter(p => p.status === 'completed' && p.role === 'creator').length;
+    const purpleStarEl = document.querySelector('.purple-star-num');
+    if (purpleStarEl) purpleStarEl.textContent = purpleStarCount;
 
-    if (projects.length === 0) {
-        grid.innerHTML = '<p class="text-muted">No projects available</p>';
-        return;
-    }
-
-    const projectsHTML = projects.map(project => {
-        const tagsHTML = project.tags && project.tags.length > 0
-            ? project.tags.slice(0, 2).map(tag => `<span class="tag">#${tag}</span>`).join('')
-            : '';
-
-        return `
-            <div class="card card-hover">
-                <div class="card-title">${project.name}</div>
-                <div class="card-desc">${project.description}</div>
-                <div class="card-tags">
-                    ${tagsHTML}
-                </div>
-            </div>
-        `;
-    }).join('');
-
-    grid.innerHTML = projectsHTML;
+    // Projects finished = all completed projects (creator or member)
+    const finishedCount = projects.filter(p => p.status === 'completed').length;
+    const finishedEl = document.querySelector('.stat-val');
+    if (finishedEl) finishedEl.textContent = finishedCount;
 }
 
 // Helper functions for badge classes
@@ -146,9 +122,9 @@ async function initDashboard() {
             welcomeTitle.textContent = `Welcome back, ${user.username}`;
         }
 
-        // Fetch data
-        fetchUserProjects();
-        fetchDiscoverProjects();
+        // Fetch data then reveal page
+        await fetchUserProjects();
+        showMainContent();
     }
 }
 

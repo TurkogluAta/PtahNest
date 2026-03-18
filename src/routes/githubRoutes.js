@@ -228,12 +228,77 @@ router.get('/commits/:projectId', requireAuth, async (req, res) => {
   }
 });
 
+// Create a GitHub repo on behalf of the user using their token.
+// Returns { success, fullName } or { success: false, error }
+async function createGithubRepo(userId, repoName) {
+  try {
+    const info = await githubDb.getGithubInfo(userId);
+    if (!info || !info.github_token) {
+      return { success: false, error: 'no_token' };
+    }
+
+    const accessToken = decrypt(info.github_token);
+
+    const response = await fetch('https://api.github.com/user/repos', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: repoName,
+        private: false,
+        auto_init: true
+      })
+    });
+
+    if (response.status === 201) {
+      const repo = await response.json();
+      return { success: true, fullName: repo.full_name };
+    }
+
+    // 422 = repo name already exists on user's account
+    if (response.status === 422) {
+      return { success: false, error: 'duplicate' };
+    }
+
+    const errBody = await response.json().catch(() => ({}));
+    return { success: false, error: errBody.message || `GitHub API error (${response.status})` };
+  } catch (err) {
+    console.error('Create GitHub repo error:', err);
+    return { success: false, error: 'Failed to create GitHub repository' };
+  }
+}
+
+// Resolve GitHub username from a github_id (public API, no token needed)
+async function resolveGithubUsername(githubId) {
+  try {
+    const res = await fetch(`https://api.github.com/user/${githubId}`, {
+      headers: { 'Accept': 'application/vnd.github+json' }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.login || null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Send GitHub collaborator invite and auto-accept on behalf of the invited user.
 // Returns an object: { sent: true/false, autoAccepted?: true, error?: string }
-async function sendCollaboratorInvite(projectId, invitedUserId, githubRepo, creatorId) {
+async function sendCollaboratorInvite(projectId, invitedUserId, githubRepo, creatorId, snapshotGithubId = null) {
   // Check if invited user has a GitHub account linked
   const invitedUser = await githubDb.getGithubInfo(invitedUserId);
-  if (!invitedUser || !invitedUser.github_username) {
+  let githubUsername = invitedUser?.github_username || null;
+
+  // Fallback: resolve username from snapshot github_id if user unlinked
+  if (!githubUsername && snapshotGithubId) {
+    githubUsername = await resolveGithubUsername(snapshotGithubId);
+  }
+  if (!githubUsername) {
     return { sent: false, error: 'User has no GitHub account linked' };
   }
 
@@ -255,7 +320,7 @@ async function sendCollaboratorInvite(projectId, invitedUserId, githubRepo, crea
 
     // Send collaborator invite via GitHub API
     const ghResponse = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/collaborators/${invitedUser.github_username}`, {
+      `https://api.github.com/repos/${owner}/${repo}/collaborators/${githubUsername}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -268,8 +333,9 @@ async function sendCollaboratorInvite(projectId, invitedUserId, githubRepo, crea
       // 201 = invite sent
       await githubDb.updateInviteStatus(projectId, invitedUserId, 1);
 
-      // Auto-accept: use invited user's token to accept the invite
+      // Auto-accept: use invited user's token to accept the invite (skip if unlinked)
       try {
+        if (!invitedUser?.github_token) throw new Error('No user token for auto-accept');
         const userToken = decrypt(invitedUser.github_token);
 
         // Fetch pending invitations for the user
@@ -324,6 +390,41 @@ async function sendCollaboratorInvite(projectId, invitedUserId, githubRepo, crea
   }
 }
 
+// Remove a GitHub collaborator using snapshot github_id
+async function removeGithubCollaborator(snapshotGithubId, githubRepo, creatorId) {
+  // Resolve GitHub username from snapshot ID
+  let githubUsername = null;
+  if (snapshotGithubId) {
+    githubUsername = await resolveGithubUsername(snapshotGithubId);
+  }
+  if (!githubUsername) {
+    return { removed: false, error: 'Could not resolve GitHub username' };
+  }
+
+  const creatorGithub = await githubDb.getGithubInfo(creatorId);
+  if (!creatorGithub || !creatorGithub.github_token) {
+    return { removed: false, error: 'Creator has no GitHub token' };
+  }
+
+  try {
+    const accessToken = decrypt(creatorGithub.github_token);
+    const [owner, repo] = githubRepo.split('/');
+    const res = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/collaborators/${githubUsername}`,
+      { method: 'DELETE', headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/vnd.github+json' } }
+    );
+    // 204 = removed, 404 = already not a collaborator
+    if (res.status === 204 || res.status === 404) {
+      return { removed: true };
+    }
+    const err = await res.json().catch(() => ({}));
+    return { removed: false, error: err.message || `GitHub API error (${res.status})` };
+  } catch (e) {
+    console.error('Remove GitHub collaborator error:', e);
+    return { removed: false, error: 'Failed to remove GitHub collaborator' };
+  }
+}
+
 // POST /unlink - Unlink GitHub account
 router.post('/unlink', requireAuth, async (req, res) => {
   const info = await githubDb.getGithubInfo(req.session.userId);
@@ -349,3 +450,5 @@ router.post('/unlink', requireAuth, async (req, res) => {
 
 module.exports = router;
 module.exports.sendCollaboratorInvite = sendCollaboratorInvite;
+module.exports.createGithubRepo = createGithubRepo;
+module.exports.removeGithubCollaborator = removeGithubCollaborator;

@@ -121,9 +121,53 @@ const createProjectValidation = [
   handleValidationErrors
 ];
 
-// Update project validation rules (same as create)
+// Update project validation rules (only editable fields — no githubRepo or projectType)
 const updateProjectValidation = [
-  ...createProjectValidation
+  body('name')
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Project name must be between 1 and 100 characters')
+    .escape(),
+
+  body('description')
+    .trim()
+    .isLength({ min: 1, max: 2000 })
+    .withMessage('Project description must be between 1 and 2000 characters')
+    .escape(),
+
+  body('tags')
+    .isArray({ max: 10 })
+    .withMessage('Tags must be an array with maximum 10 items')
+    .custom((tags) => {
+      if (!tags.every(tag => typeof tag === 'string' && tag.trim().length > 0 && tag.length <= 30)) {
+        throw new Error('Each tag must be a non-empty string with maximum 30 characters');
+      }
+      return true;
+    }),
+
+  body('tags.*')
+    .trim()
+    .escape(),
+
+  body('lookingFor')
+    .isArray({ max: 10 })
+    .withMessage('Looking for must be an array with maximum 10 items')
+    .custom((roles) => {
+      if (!roles.every(role => typeof role === 'string' && role.trim().length > 0 && role.length <= 50)) {
+        throw new Error('Each role must be a non-empty string with maximum 50 characters');
+      }
+      return true;
+    }),
+
+  body('lookingFor.*')
+    .trim()
+    .escape(),
+
+  body('recruitmentOpen')
+    .isBoolean()
+    .withMessage('Recruitment status must be true or false'),
+
+  handleValidationErrors
 ];
 
 // Join request validation rules
@@ -165,6 +209,15 @@ const paramRequestIdValidation = [
   handleValidationErrors
 ];
 
+// Member ID parameter validation (UUID)
+const paramMemberIdValidation = [
+  param('memberId')
+    .isUUID()
+    .withMessage('Invalid member ID format'),
+
+  handleValidationErrors
+];
+
 module.exports = {
   registerValidation,
   loginValidation,
@@ -173,5 +226,6 @@ module.exports = {
   joinRequestValidation,
   manageRequestValidation,
   paramIdValidation,
-  paramRequestIdValidation
+  paramRequestIdValidation,
+  paramMemberIdValidation
 };

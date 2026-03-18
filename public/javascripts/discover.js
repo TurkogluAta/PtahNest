@@ -128,6 +128,11 @@ function renderProjectCard(project) {
             `<span class="project-tag">${tag}</span>`).join('')}</div>`
         : '';
 
+    // Repo badge for software projects with a linked GitHub repo
+    const repoTagHTML = project.projectType === 'software' && project.githubRepo
+        ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14">${project.githubRepo}</span>`
+        : '';
+
     const lookingForHTML = project.lookingFor && project.lookingFor.length > 0
         ? `<div class="project-looking-for">
              <span class="looking-for-label">Looking for:</span>
@@ -145,6 +150,7 @@ function renderProjectCard(project) {
                     <div class="card-desc no-margin">${project.description}</div>
                 </div>
                 <div class="badge-group">
+                    ${repoTagHTML}
                     ${(() => { const t = PROJECT_TYPES[project.projectType] || PROJECT_TYPES.software; return `<span class="badge ${t.badgeClass}">${t.label}</span>`; })()}
                     <span class="badge badge-success">Recruiting</span>
                 </div>
@@ -294,6 +300,11 @@ function openProjectModal(projectId) {
             `<span class="project-tag">${tag}</span>`).join('')}</div>`
         : '';
 
+    // Repo badge for software projects with a linked GitHub repo
+    const modalRepoTagHTML = project.projectType === 'software' && project.githubRepo
+        ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14">${project.githubRepo}</span>`
+        : '';
+
     const lookingForHTML = project.lookingFor && project.lookingFor.length > 0
         ? `<div class="project-looking-for">
              <span class="looking-for-label">Looking for:</span>
@@ -316,7 +327,8 @@ function openProjectModal(projectId) {
             ${project.name}
         </div>
 
-        <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem;">
+        <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
+            ${modalRepoTagHTML}
             <span class="badge badge-success">Recruiting</span>
             <span class="meta-inline">
                 <img src="../pictures/icons/members.svg" width="16">
@@ -366,7 +378,7 @@ async function joinProject(projectId) {
         const data = await response.json();
 
         if (response.ok) {
-            alert('Join request sent successfully! The project creator will review your request.');
+            showToast('Join request sent successfully! The project creator will review your request.', 'success', 5000);
             closeProjectModal();
             // Remove project from discover list
             discoverProjects = discoverProjects.filter(p => p.id !== projectId);
@@ -377,12 +389,12 @@ async function joinProject(projectId) {
                 window.location.href = '/pages/profile.html';
             }
         } else {
-            alert(data.message || 'Failed to send join request');
+            showToast(data.message || 'Failed to send join request', 'error');
         }
 
     } catch (error) {
         console.error('Join project error:', error);
-        alert('Failed to send join request. Please try again.');
+        showToast('Failed to send join request. Please try again.', 'error');
     }
 }
 
@@ -406,5 +418,6 @@ document.addEventListener('keydown', (e) => {
 // Initialize page
 (async function initPage() {
     await checkUserAuth();
-    fetchDiscoverProjects();
+    await fetchDiscoverProjects();
+    showMainContent();
 })();

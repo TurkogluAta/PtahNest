@@ -86,6 +86,7 @@ async function initDatabase() {
       user_id TEXT NOT NULL,
       role TEXT NOT NULL,
       membership_status TEXT NOT NULL DEFAULT 'active',
+      github_id BIGINT,
       github_invited INTEGER DEFAULT 0,
       github_invited_at TIMESTAMPTZ,
       joined_at TIMESTAMPTZ DEFAULT NOW(),
@@ -96,6 +97,11 @@ async function initDatabase() {
     )
   `);
 
+  // Add github_id column to project_members if it doesn't exist (migration)
+  await pool.query(`
+    ALTER TABLE project_members ADD COLUMN IF NOT EXISTS github_id BIGINT
+  `);
+
   // Join requests table
   await pool.query(`
     CREATE TABLE IF NOT EXISTS join_requests (
@@ -104,11 +110,17 @@ async function initDatabase() {
       user_id TEXT NOT NULL,
       status TEXT NOT NULL,
       message TEXT,
+      github_id BIGINT,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       FOREIGN KEY (project_id) REFERENCES projects(id),
       FOREIGN KEY (user_id) REFERENCES users(id),
       UNIQUE(project_id, user_id)
     )
+  `);
+
+  // Add github_id column to join_requests if it doesn't exist (migration)
+  await pool.query(`
+    ALTER TABLE join_requests ADD COLUMN IF NOT EXISTS github_id BIGINT
   `);
 
   console.log('Database initialized');
@@ -299,6 +311,7 @@ const projectDb = {
     const { rows } = await pool.query(
       `SELECT DISTINCT p.*,
         pm.membership_status,
+        pm.role,
         pm.left_at,
         (SELECT COUNT(*) FROM project_members WHERE project_id = p.id AND membership_status = 'active') as members,
         CASE
@@ -325,7 +338,9 @@ const projectDb = {
         status: displayStatus,
         tags: safeJsonParse(row.tags, []),
         lookingFor: safeJsonParse(row.looking_for, []),
+        role: row.role,
         recruitmentOpen: Boolean(row.recruitment_open),
+        githubRepo: row.github_repo || null,
         projectType: row.project_type,
         members: Number(row.members)
       };
@@ -371,15 +386,27 @@ const projectDb = {
       tags: safeJsonParse(row.tags, []),
       lookingFor: safeJsonParse(row.looking_for, []),
       recruitmentOpen: Boolean(row.recruitment_open),
+      githubRepo: row.github_repo || null,
       projectType: row.project_type,
       members: Number(row.members)
     }));
   },
 
-  // READ: Get single project by ID
-  async findById(id) {
-    const { rows } = await pool.query('SELECT * FROM projects WHERE id = $1', [id]);
-    const row = rows[0];
+  // READ: Get single project by ID (optional userId to include viewer's role)
+  async findById(id, userId = null) {
+    let row;
+    if (userId) {
+      const { rows } = await pool.query(
+        `SELECT p.*, pm.role FROM projects p
+         LEFT JOIN project_members pm ON p.id = pm.project_id AND pm.user_id = $2
+         WHERE p.id = $1`,
+        [id, userId]
+      );
+      row = rows[0];
+    } else {
+      const { rows } = await pool.query('SELECT * FROM projects WHERE id = $1', [id]);
+      row = rows[0];
+    }
 
     if (!row) return null;
 
@@ -389,17 +416,19 @@ const projectDb = {
       tags: safeJsonParse(row.tags, []),
       lookingFor: safeJsonParse(row.looking_for, []),
       recruitmentOpen: Boolean(row.recruitment_open),
-      projectType: row.project_type
+      githubRepo: row.github_repo || null,
+      projectType: row.project_type,
+      role: row.role || null
     };
   },
 
-  // UPDATE: Update project
-  async update(id, creatorId, { name, description, tags, lookingFor, recruitmentOpen, githubRepo = null }) {
+  // UPDATE: Update project (github_repo and project_type are immutable after creation)
+  async update(id, creatorId, { name, description, tags, lookingFor, recruitmentOpen }) {
     const { rowCount } = await pool.query(
       `UPDATE projects
-       SET name = $1, description = $2, tags = $3, looking_for = $4, recruitment_open = $5, github_repo = $6, updated_at = NOW()
-       WHERE id = $7 AND creator_id = $8`,
-      [name, description, JSON.stringify(tags), JSON.stringify(lookingFor), recruitmentOpen, githubRepo, id, creatorId]
+       SET name = $1, description = $2, tags = $3, looking_for = $4, recruitment_open = $5, updated_at = NOW()
+       WHERE id = $6 AND creator_id = $7 AND project_status = 'active'`,
+      [name, description, JSON.stringify(tags), JSON.stringify(lookingFor), recruitmentOpen, id, creatorId]
     );
     return rowCount > 0;
   },
@@ -410,7 +439,7 @@ const projectDb = {
     if (!project || project.creator_id !== creatorId) return false;
 
     const { rowCount } = await pool.query(
-      `UPDATE projects SET recruitment_open = $1, updated_at = NOW() WHERE id = $2 AND creator_id = $3`,
+      `UPDATE projects SET recruitment_open = $1, updated_at = NOW() WHERE id = $2 AND creator_id = $3 AND project_status = 'active'`,
       [!project.recruitmentOpen, id, creatorId]
     );
     return rowCount > 0;
@@ -425,6 +454,16 @@ const projectDb = {
     return rows;
   },
 
+  // COMPLETE: Mark project as completed (creator only)
+  async complete(id, creatorId) {
+    const { rowCount } = await pool.query(
+      `UPDATE projects SET project_status = 'completed', recruitment_open = FALSE, updated_at = NOW()
+       WHERE id = $1 AND creator_id = $2 AND project_status = 'active'`,
+      [id, creatorId]
+    );
+    return rowCount > 0;
+  },
+
   // DELETE: Soft delete project
   async delete(id, creatorId) {
     const client = await pool.connect();
@@ -433,7 +472,7 @@ const projectDb = {
 
       // Soft delete: mark project as deleted
       const { rowCount } = await client.query(
-        `UPDATE projects SET project_status = 'deleted', updated_at = NOW() WHERE id = $1 AND creator_id = $2`,
+        `UPDATE projects SET project_status = 'deleted', updated_at = NOW() WHERE id = $1 AND creator_id = $2 AND project_status = 'active'`,
         [id, creatorId]
       );
 
@@ -475,17 +514,51 @@ const memberDb = {
     return rows;
   },
 
-  // Add member to project
-  async addMember(projectId, userId, role = 'member') {
+  // Add member to project (github_id snapshot from join request)
+  async addMember(projectId, userId, role = 'member', githubId = null) {
     const id = require('crypto').randomUUID();
     await pool.query(
-      `INSERT INTO project_members (id, project_id, user_id, role, membership_status) VALUES ($1, $2, $3, $4, 'active')`,
-      [id, projectId, userId, role]
+      `INSERT INTO project_members (id, project_id, user_id, role, membership_status, github_id) VALUES ($1, $2, $3, $4, 'active', $5)`,
+      [id, projectId, userId, role, githubId]
     );
     return { id, projectId, userId, role };
   },
 
-  // Remove member from project (soft delete)
+  // Kick member from project (creator action)
+  async kickMember(projectId, userId) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Get github_id before updating status
+      const { rows } = await client.query(
+        `SELECT github_id FROM project_members WHERE project_id = $1 AND user_id = $2 AND membership_status = 'active' AND role != 'creator'`,
+        [projectId, userId]
+      );
+      if (rows.length === 0) {
+        await client.query('COMMIT');
+        return null;
+      }
+      const githubId = rows[0].github_id;
+
+      // Mark as kicked
+      await client.query(
+        `UPDATE project_members SET membership_status = 'kicked', left_at = NOW(), github_invited = 0
+         WHERE project_id = $1 AND user_id = $2`,
+        [projectId, userId]
+      );
+
+      await client.query('COMMIT');
+      return { kicked: true, githubId };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  },
+
+  // Remove member from project (soft delete — self-leave)
   async removeMember(projectId, userId) {
     const client = await pool.connect();
     try {
@@ -516,12 +589,12 @@ const memberDb = {
 
 // Join requests database operations
 const joinRequestDb = {
-  // Create join request
-  async create(projectId, userId, message = null) {
+  // Create join request (github_id snapshot for software projects)
+  async create(projectId, userId, message = null, githubId = null) {
     const id = require('crypto').randomUUID();
     await pool.query(
-      `INSERT INTO join_requests (id, project_id, user_id, status, message) VALUES ($1, $2, $3, 'pending', $4)`,
-      [id, projectId, userId, message]
+      `INSERT INTO join_requests (id, project_id, user_id, status, message, github_id) VALUES ($1, $2, $3, 'pending', $4, $5)`,
+      [id, projectId, userId, message, githubId]
     );
     return { id, projectId, userId, status: 'pending', message };
   },

@@ -3,8 +3,8 @@ const urlParams = new URLSearchParams(window.location.search);
 const projectId = urlParams.get('id');
 
 if (!projectId) {
-    alert('No project ID provided');
-    window.location.href = '/pages/projects.html';
+    showToast('No project ID provided', 'error');
+    setTimeout(() => { window.location.href = '/pages/projects.html'; }, 1500);
 }
 
 // State
@@ -36,8 +36,8 @@ async function fetchProjectDetails() {
 
     } catch (error) {
         console.error('Fetch project error:', error);
-        alert('Failed to load project. Redirecting...');
-        window.location.href = '/pages/projects.html';
+        showToast('Failed to load project. Redirecting...', 'error');
+        setTimeout(() => { window.location.href = '/pages/projects.html'; }, 1500);
     }
 }
 
@@ -59,24 +59,33 @@ async function fetchMembers() {
         } else {
             // User not authorized to view members
             const data = await response.json();
-            alert(data.message || 'You are not authorized to view this project');
-            window.location.href = '/pages/projects.html';
+            showToast(data.message || 'You are not authorized to view this project', 'error');
+            setTimeout(() => { window.location.href = '/pages/projects.html'; }, 1500);
         }
     } catch (error) {
         console.error('Fetch members error:', error);
-        alert('Failed to load project members');
+        showToast('Failed to load project members', 'error');
     }
 }
 
 // Render project header
 function renderProjectHeader() {
+    // Repo badge for software projects with a linked GitHub repo
+    const repoTagHTML = project.projectType === 'software' && project.githubRepo
+        ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14">${project.githubRepo}</span>`
+        : '';
+
     const headerHTML = `
         <div class="flex-between-start">
             <div>
                 <h1 class="hero-title">${project.name}</h1>
                 <p class="text-muted">Created by ${project.creator_username}</p>
             </div>
-            <span class="badge ${getBadgeClass(project.status)}">${getBadgeText(project.status)}</span>
+            <div class="badge-group">
+                ${project.status === 'completed' && project.role === 'creator' ? '<img src="../pictures/icons/purple-star.svg" width="20" height="20" title="Project Creator">' : ''}
+                ${repoTagHTML}
+                <span class="badge ${getBadgeClass(project.status)}">${getBadgeText(project.status)}</span>
+            </div>
         </div>
     `;
     document.getElementById('projectHeader').innerHTML = headerHTML;
@@ -138,33 +147,78 @@ function renderMembers() {
         return;
     }
 
-    const membersHTML = members.map(member => `
-        <div class="card card-sm card-bottom-gap">
-            <div class="flex-between-center">
-                <div>
-                    <div class="member-name">${member.username}</div>
-                    <div class="member-role">
-                        ${member.role === 'creator' ? 'Project Creator' : 'Team Member'}
+    const isCreator = project && project.creator_id === currentUserId;
+    const canKick = isCreator && project.status === 'active';
+
+    const membersHTML = members.map(member => {
+        // Show kick button for non-creator members when viewer is creator
+        const kickBtnHTML = canKick && member.role !== 'creator'
+            ? `<button class="btn btn-outline btn-danger btn-sm" onclick="kickMember('${member.user_id}', '${member.username}')">Kick</button>`
+            : '';
+
+        return `
+            <div class="card card-sm card-bottom-gap">
+                <div class="flex-between-center">
+                    <div>
+                        <div class="member-name">${member.username}</div>
+                        <div class="member-role">
+                            ${member.role === 'creator' ? 'Project Creator' : 'Team Member'}
+                        </div>
+                        <div class="member-joined">
+                            Joined ${formatDate(member.joined_at)}
+                        </div>
                     </div>
-                    <div class="member-joined">
-                        Joined ${formatDate(member.joined_at)}
+                    <div class="member-actions">
+                        ${member.role === 'creator' ? '<span class="badge badge-success">Creator</span>' : ''}
+                        ${kickBtnHTML}
                     </div>
                 </div>
-                ${member.role === 'creator' ? '<span class="badge badge-success">Creator</span>' : ''}
             </div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
 
     document.getElementById('membersContainer').innerHTML = membersHTML;
 }
 
+// Kick member from project (creator only)
+async function kickMember(memberId, username) {
+    if (!confirm(`Are you sure you want to kick "${username}" from this project? They will not be able to rejoin.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/projects/${projectId}/members/${memberId}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            showToast(`${username} has been kicked from the project`, 'success');
+            await fetchMembers();
+        } else {
+            showToast(data.message || 'Failed to kick member', 'error');
+        }
+    } catch (error) {
+        console.error('Kick member error:', error);
+        showToast('Failed to kick member. Please try again.', 'error');
+    }
+}
+
 // Render action buttons (role-based)
 function renderActions() {
-    // Don't show actions if project is deleted
-    if (project.status === 'deleted') {
+    // Don't show actions for non-active projects
+    if (project.status !== 'active') {
+        const statusMessages = {
+            'deleted': 'This project has been deleted',
+            'completed': 'This project has been completed',
+            'left': 'You have left this project',
+            'kicked': 'You have been removed from this project'
+        };
         document.getElementById('actionsSection').innerHTML = `
             <div class="card card-sm card-centered">
-                <p class="text-muted">This project has been deleted</p>
+                <p class="text-muted">${statusMessages[project.status] || 'This project is no longer active'}</p>
             </div>
         `;
         return;
@@ -176,10 +230,9 @@ function renderActions() {
     let actionsHTML = '<div class="action-row">';
 
     if (isCreator) {
-        // Creator actions: Edit + Delete
+        // Creator actions: Edit only (delete is inside edit modal)
         actionsHTML += `
             <button class="btn btn-primary" onclick="editProject()">Edit Project</button>
-            <button class="btn btn-outline btn-danger" onclick="deleteProject()">Delete Project</button>
         `;
     } else if (isMember) {
         // Member action: Leave
@@ -193,10 +246,9 @@ function renderActions() {
     document.getElementById('actionsSection').innerHTML = actionsHTML;
 }
 
-// Edit project (placeholder for future implementation)
+// Edit project — redirect to projects page where edit modal lives
 function editProject() {
-    alert('Edit functionality will be implemented in a future update.');
-    // TODO: Implement edit modal or redirect to edit page
+    window.location.href = `/pages/projects.html?edit=${projectId}`;
 }
 
 // Delete project
@@ -220,14 +272,14 @@ async function deleteProject() {
         }
 
         if (response.ok) {
-            alert('Project deleted successfully');
-            window.location.href = '/pages/projects.html';
+            showToast('Project deleted successfully', 'success');
+            setTimeout(() => { window.location.href = '/pages/projects.html'; }, 1500);
         } else {
-            alert(data.message || 'Failed to delete project');
+            showToast(data.message || 'Failed to delete project', 'error');
         }
     } catch (error) {
         console.error('Delete project error:', error);
-        alert('Failed to delete project. Please try again.');
+        showToast('Failed to delete project. Please try again.', 'error');
     }
 }
 
@@ -252,14 +304,14 @@ async function leaveProject() {
         }
 
         if (response.ok) {
-            alert('You have left the project');
-            window.location.href = '/pages/projects.html';
+            showToast('You have left the project', 'success');
+            setTimeout(() => { window.location.href = '/pages/projects.html'; }, 1500);
         } else {
-            alert(data.message || 'Failed to leave project');
+            showToast(data.message || 'Failed to leave project', 'error');
         }
     } catch (error) {
         console.error('Leave project error:', error);
-        alert('Failed to leave project. Please try again.');
+        showToast('Failed to leave project. Please try again.', 'error');
     }
 }
 
@@ -310,7 +362,7 @@ let allCommits = [];
 
 // Fetch commits for current page
 async function fetchCommits(page = 1) {
-    if (!project || !project.github_repo) return;
+    if (!project || !project.githubRepo) return;
 
     const section = document.getElementById('commitsSection');
     const container = document.getElementById('commitsContainer');
@@ -451,5 +503,8 @@ function formatCommitDate(dateString) {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-// Initialize on page load
-fetchProjectDetails();
+// Initialize on page load, then reveal content
+(async function initProjectDetail() {
+    await fetchProjectDetails();
+    showMainContent();
+})();
