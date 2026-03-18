@@ -6,24 +6,20 @@
 
 var app = require('../app');
 var debug = require('debug')('ptahnest:server');
-var https = require('https');
-var fs = require('fs');
+var http = require('http');
 
 /**
  * Get port from environment and store in Express.
  */
 
-var port = normalizePort(process.env.PORT || '8443');
+var port = normalizePort(process.env.PORT || '3000');
 app.set('port', port);
 
 /**
- * Create HTTPS server with SSL certificates.
+ * Create HTTP server. SSL is handled by Nginx reverse proxy.
  */
 
-var server = https.createServer({
-  key: fs.readFileSync('privatekey.pem'),
-  cert: fs.readFileSync('server.crt')
-}, app);
+var server = http.createServer(app);
 
 /**
  * Listen on provided port, on all network interfaces.
