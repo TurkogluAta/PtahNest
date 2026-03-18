@@ -42,10 +42,30 @@ function dismissToast(toast) {
     toast.addEventListener('transitionend', () => toast.remove());
 }
 
-// Reveal main content after data is ready
+// Create loading screen
+function createLoader() {
+    const loader = document.createElement('div');
+    loader.className = 'page-loader';
+    loader.id = 'pageLoader';
+    loader.innerHTML = `
+        <div class="loader-spinner"></div>
+        <div class="loader-text">Loading<span class="loader-dots"></span></div>
+    `;
+    document.body.appendChild(loader);
+}
+
+// Initialize loader on page load (skip auth page)
+if (!window.location.pathname.includes('auth.html')) {
+    createLoader();
+}
+
+// Reveal main content and hide loader
 function showMainContent() {
     const main = document.querySelector('.main-content');
     if (main) main.classList.add('loaded');
+
+    const loader = document.getElementById('pageLoader');
+    if (loader) loader.classList.add('hidden');
 }
 
 // Authentication guard - checks if user is logged in
