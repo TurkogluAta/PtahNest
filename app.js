@@ -26,16 +26,22 @@ var app = express();
 app.set('trust proxy', process.env.NODE_ENV === 'production');
 
 // Initialize database (async - tables are created before server starts)
-initDatabase().catch(err => {
-  console.error('Database initialization failed:', err);
-  process.exit(1);
-});
+// In test environment, tests handle initialization themselves
+if (process.env.NODE_ENV !== 'test') {
+  initDatabase().catch(err => {
+    console.error('Database initialization failed:', err);
+    process.exit(1);
+  });
+}
 
 // view engine setup
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'jade');
 
-app.use(logger('dev'));
+// Disable morgan logging in test environment
+if (process.env.NODE_ENV !== 'test') {
+  app.use(logger('dev'));
+}
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
@@ -69,21 +75,22 @@ app.use(session({
 app.use(validateSessionFingerprint);
 
 // Rate limiting - Different limits for different endpoints
+const isTest = process.env.NODE_ENV === 'test';
+
 // Auth endpoints: Stricter (prevent brute force, registration spam)
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 300, // 100 requests per 15 min (allows page refreshes + auth checks)
+  windowMs: 15 * 60 * 1000,
+  max: isTest ? 10000 : 300,
   message: 'Too many authentication attempts, please try again later',
   standardHeaders: true,
   legacyHeaders: false,
-  // Skip rate limiting for /me endpoint (auth checks)
   skip: (req) => req.path === '/me'
 });
 
 // General API endpoints: More lenient (normal app usage)
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // 1000 requests per 15 min (~66 req/min, allows page refreshes & development)
+  windowMs: 15 * 60 * 1000,
+  max: isTest ? 10000 : 1000,
   message: 'Too many requests, please try again later',
   standardHeaders: true,
   legacyHeaders: false

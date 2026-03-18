@@ -3,11 +3,18 @@ version: 2.1
 workflows:
   build-and-deploy:
     jobs:
+      - test:
+          filters:
+            branches:
+              only:
+                - main
       - build:
           filters:
             branches:
               only:
                 - main
+          requires:
+            - test
       - deploy:
           filters:
             branches:
@@ -17,6 +24,43 @@ workflows:
             - build
 
 jobs:
+  test:
+    working_directory: ~/PtahNest
+    docker:
+      # Node.js primary container
+      - image: cimg/node:20.0
+        environment:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ptahnest_test
+          SESSION_SECRET: ci_test_session_secret_at_least_64_chars_long_for_security_1234567890abcdef
+          SESSION_NAME: ptahnest_test_session
+          GITHUB_CLIENT_ID: test_client_id
+          GITHUB_CLIENT_SECRET: test_client_secret
+          TOKEN_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      # PostgreSQL service container
+      - image: cimg/postgres:16.0
+        environment:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ptahnest_test
+    steps:
+      - checkout
+      - restore_cache:
+          key: dependency-cache-{{ checksum "package-lock.json" }}
+      - run:
+          name: Install Dependencies
+          command: npm install
+      - save_cache:
+          key: dependency-cache-{{ checksum "package-lock.json" }}
+          paths:
+            - ./node_modules
+      - run:
+          name: Wait for PostgreSQL
+          command: dockerize -wait tcp://localhost:5432 -timeout 10s
+      - run:
+          name: Run Tests
+          command: npm test
+
   build:
     working_directory: ~/PtahNest
     docker:

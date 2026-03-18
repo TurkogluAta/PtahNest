@@ -278,7 +278,7 @@ const projectDb = {
       client.release();
     }
 
-    return { id, name, description, project_status: 'active', status: 'active', tags, lookingFor, recruitmentOpen, projectType, members: 1 };
+    return { id, name, description, project_status: 'active', status: 'active', tags, lookingFor, recruitmentOpen, githubRepo, projectType, members: 1 };
   },
 
   // Check if creator already has an active project with the same name
