@@ -27,6 +27,18 @@
                 </nav>
 
                 <div class="header-icons">
+                    <!-- NOTIFICATION BELL -->
+                    <div class="notif-wrapper" id="notifWrapper">
+                        <button class="notif-bell" id="notifBell">
+                            <img src="../pictures/icons/bell.svg" width="20" height="20" alt="Notifications">
+                            <span class="notif-badge" id="notifBadge">0</span>
+                        </button>
+                        <div class="notif-panel" id="notifPanel">
+                            <div class="notif-panel-header">Notifications</div>
+                            <div class="notif-panel-body" id="notifPanelBody"></div>
+                        </div>
+                    </div>
+
                     <!-- USER AVATAR -->
                     <div class="user-wrapper">
                         <div class="user-avatar" id="userAvatar">
@@ -76,7 +88,7 @@
                 <div class="card-title">GitHub</div>
                 <div id="githubMessage" class="github-message" style="display:none;"></div>
                 <div id="githubStatus" class="profile-data">Loading...</div>
-                <div id="githubActions" style="margin-top: 1rem;"></div>
+                <div id="githubActions" class="spaced-top"></div>
             </div>
         </section>
     </main>

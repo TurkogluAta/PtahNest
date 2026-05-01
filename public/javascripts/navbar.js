@@ -42,6 +42,35 @@ function dismissToast(toast) {
     toast.addEventListener('transitionend', () => toast.remove());
 }
 
+// ========================================
+// CONFIRM DIALOG
+// ========================================
+
+function showConfirm(message, onConfirm, { confirmText = 'Confirm', cancelText = 'Cancel', danger = false } = {}) {
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay';
+    overlay.innerHTML = `
+        <div class="confirm-box">
+            <p class="confirm-message">${message}</p>
+            <div class="confirm-actions">
+                <button class="btn btn-sm btn-outline confirm-cancel-btn">${cancelText}</button>
+                <button class="btn btn-sm ${danger ? 'btn-outline btn-danger' : 'btn-primary'} confirm-ok-btn">${confirmText}</button>
+            </div>
+        </div>`;
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('confirm-visible'));
+
+    const close = () => {
+        overlay.classList.remove('confirm-visible');
+        overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
+    };
+
+    overlay.querySelector('.confirm-cancel-btn').addEventListener('click', close);
+    overlay.querySelector('.confirm-ok-btn').addEventListener('click', () => { close(); onConfirm(); });
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+}
+
 // Create loading screen
 function createLoader() {
     const loader = document.createElement('div');
@@ -95,6 +124,7 @@ async function checkAuth() {
         }
 
         const data = await response.json();
+        window._currentUserId = data.user?.id || '';
         showUserControls();
         return data.user;
     } catch (error) {
@@ -250,40 +280,72 @@ document.addEventListener('click', (e) => {
     }
 });
 
-// Fetch join requests for all user's creator projects
+// Pending kick votes for bell (separate array)
+let notifKickVotes = [];
+
+// Unread chat messages for applicants (requests where last message is from management)
+let notifChatMessages = [];
+
+
+// Fetch join requests for all management projects (creator + moderator) + pending kick votes
 async function fetchNotifRequests() {
     try {
-        // Get user's projects
-        const res = await fetch('/api/projects', {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-        });
-        if (!res.ok) return;
+        // Run all fetches in parallel
+        const [projectsRes, kickRes, myReqRes] = await Promise.all([
+            fetch('/api/projects'),
+            fetch('/api/projects/me/kick-votes/pending'),
+            fetch('/api/projects/my-requests')
+        ]);
 
-        const data = await res.json();
-        const creatorProjects = (data.projects || []).filter(p => p.status === 'active' && p.role === 'creator');
+        // Management join requests
+        if (projectsRes.ok) {
+            const data = await projectsRes.json();
+            const managementProjects = (data.projects || []).filter(
+                p => p.status === 'active' && (p.role === 'creator' || p.role === 'moderator')
+            );
+            const requestPromises = managementProjects.map(async (project) => {
+                try {
+                    const r = await fetch(`/api/projects/${project.id}/requests`);
+                    if (r.ok) {
+                        const d = await r.json();
+                        return d.requests.map(req => {
+                            const managementEverWrote = parseInt(req.management_message_count || 0) > 0;
+                            const lastFromApplicant = req.last_message_sender_id === req.user_id;
+                            let notifKind = null;
+                            if (!managementEverWrote) {
+                                // Management never replied → always show as Join Request
+                                notifKind = 'join';
+                            } else if (lastFromApplicant) {
+                                // Management replied before, applicant wrote last → Chat Message
+                                notifKind = 'chat';
+                            }
+                            // else: management wrote last → no notification
+                            return { ...req, projectName: project.name, projectId: project.id, notifKind };
+                        });
+                    }
+                    return [];
+                } catch { return []; }
+            });
+            const results = await Promise.all(requestPromises);
+            notifRequests = results.flat();
+        }
 
-        // Fetch requests for each creator project
-        const promises = creatorProjects.map(async (project) => {
-            try {
-                const r = await fetch(`/api/projects/${project.id}/requests`, {
-                    method: 'GET',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                if (r.ok) {
-                    const d = await r.json();
-                    return d.requests.map(req => ({
-                        ...req,
-                        projectName: project.name,
-                        projectId: project.id
-                    }));
-                }
-                return [];
-            } catch { return []; }
-        });
+        // Pending kick votes
+        if (kickRes.ok) {
+            const kickData = await kickRes.json();
+            notifKickVotes = kickData.votes || [];
+        }
 
-        const results = await Promise.all(promises);
-        notifRequests = results.flat();
+        // Applicant notifications: unread chat messages + accepted requests
+        if (myReqRes.ok) {
+            const myReqData = await myReqRes.json();
+            notifChatMessages = (myReqData.requests || []).filter(r =>
+                r.last_message_at &&
+                r.last_message_sender_id &&
+                r.last_message_sender_id !== (window._currentUserId || '')
+            ).map(r => ({ ...r, _notifType: 'chat' }));
+        }
+
         updateNotifBadge();
         renderNotifPanel();
     } catch (error) {
@@ -295,37 +357,67 @@ async function fetchNotifRequests() {
 function updateNotifBadge() {
     const badge = document.getElementById('notifBadge');
     if (!badge) return;
-    if (notifRequests.length > 0) {
-        badge.textContent = notifRequests.length;
+    const total = notifRequests.filter(r => r.notifKind).length + notifKickVotes.length + notifChatMessages.length;
+    if (total > 0) {
+        badge.textContent = total;
         badge.style.display = 'flex';
     } else {
         badge.style.display = 'none';
     }
 }
 
-// Render notification panel content
+// Render notification panel content (join requests + kick vote notifications)
 function renderNotifPanel() {
     const body = document.getElementById('notifPanelBody');
     if (!body) return;
 
-    if (notifRequests.length === 0) {
-        body.innerHTML = '<div class="notif-empty">No pending requests</div>';
+    const activeRequests = notifRequests.filter(r => r.notifKind);
+    const total = activeRequests.length + notifKickVotes.length + notifChatMessages.length;
+    if (total === 0) {
+        body.innerHTML = '<div class="notif-empty">No pending notifications</div>';
         return;
     }
 
-    body.innerHTML = notifRequests.map(req => `
+    const requestsHTML = activeRequests.map(req => `
         <div class="notif-item" id="notif-${req.id}">
             <div class="notif-item-info">
-                <div class="notif-item-user">${req.username}</div>
+                <div class="notif-item-type ${req.notifKind === 'join' ? 'notif-type-join' : 'notif-type-chat'}">${req.notifKind === 'join' ? 'Join Request' : 'Join Request Chat'}</div>
                 <div class="notif-item-project">${req.projectName}</div>
-                <div class="notif-item-time">${notifFormatDate(req.created_at)}</div>
+                <div class="notif-item-user">${req.username} · ${notifFormatDate(req.created_at)}</div>
             </div>
             <div class="notif-item-actions">
-                <button class="notif-btn notif-btn-accept" onclick="notifAccept('${req.id}', '${req.projectId}')">Accept</button>
-                <button class="notif-btn notif-btn-reject" onclick="notifReject('${req.id}', '${req.projectId}')">Reject</button>
+                <a class="notif-btn notif-btn-accept" href="/pages/project-detail.html?id=${req.projectId}">Review</a>
             </div>
         </div>
     `).join('');
+
+    const kickVotesHTML = notifKickVotes.map(v => `
+        <div class="notif-item">
+            <div class="notif-item-info">
+                <div class="notif-item-type notif-type-kick">Kick Vote</div>
+                <div class="notif-item-project">${v.project_name}</div>
+                <div class="notif-item-user">Kick ${v.target_username} · by ${v.initiator_username}</div>
+            </div>
+            <div class="notif-item-actions">
+                <a class="notif-btn notif-btn-accept" href="/pages/project-detail.html?id=${v.project_id}">Vote</a>
+            </div>
+        </div>
+    `).join('');
+
+    const chatHTML = notifChatMessages.map(r => `
+        <div class="notif-item">
+            <div class="notif-item-info">
+                <div class="notif-item-type notif-type-chat">Join Request Chat</div>
+                <div class="notif-item-project">${r.project_name}</div>
+                <div class="notif-item-user">${notifFormatDate(r.last_message_at)}</div>
+            </div>
+            <div class="notif-item-actions">
+                <a class="notif-btn notif-btn-accept" href="/pages/projects.html">Open</a>
+            </div>
+        </div>
+    `).join('');
+
+    body.innerHTML = requestsHTML + kickVotesHTML + chatHTML;
 }
 
 // Format date for notifications

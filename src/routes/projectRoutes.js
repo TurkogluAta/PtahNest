@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { projectDb, userDb, memberDb, joinRequestDb, githubDb, pool } = require('../models/database');
-const { sendCollaboratorInvite, createGithubRepo, removeGithubCollaborator } = require('./githubRoutes');
+const { projectDb, userDb, memberDb, joinRequestDb, joinRequestMessageDb, githubDb, kickVoteDb, pool } = require('../models/database');
+const { encrypt, decrypt } = require('../utils/encryption');
+const { sendCollaboratorInvite, createGithubRepo, removeGithubCollaborator, resolveGithubUsername } = require('./githubRoutes');
 const {
   createProjectValidation,
   updateProjectValidation,
@@ -9,7 +10,13 @@ const {
   manageRequestValidation,
   paramIdValidation,
   paramRequestIdValidation,
-  paramMemberIdValidation
+  paramMemberIdValidation,
+  paramVoteIdValidation,
+  moderatorValidation,
+  kickVoteValidation,
+  ballotValidation,
+  messageContentValidation,
+  paramUserIdValidation
 } = require('../middleware/validators');
 
 // Middleware: Check if user is authenticated
@@ -21,6 +28,29 @@ function requireAuth(req, res, next) {
     });
   }
   next();
+}
+
+// Middleware: Check if user is creator or moderator of the project
+async function requireManagement(req, res, next) {
+  try {
+    const project = await projectDb.findById(req.params.id);
+    if (!project) {
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+    const userId = req.session.userId;
+    const isCreator = project.creator_id === userId;
+    const isMod = await memberDb.isModerator(req.params.id, userId);
+    if (!isCreator && !isMod) {
+      return res.status(403).json({ success: false, message: 'Management role required' });
+    }
+    req.project = project;
+    req.isCreator = isCreator;
+    req.isMod = isMod;
+    next();
+  } catch (err) {
+    console.error('requireManagement error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
 }
 
 // CREATE: New project
@@ -66,6 +96,19 @@ router.post('/', requireAuth, createProjectValidation, async (req, res) => {
         });
       }
       repoValue = repoResult.fullName;
+    }
+
+    // Verify the selected repo is owned by the requesting user (block collaborator repos)
+    if (typeValue === 'software' && repoValue) {
+      const githubInfo = await githubDb.getGithubInfo(req.session.userId);
+      const ownerLogin = (githubInfo?.github_username || '').toLowerCase();
+      const repoOwner = repoValue.split('/')[0]?.toLowerCase();
+      if (!ownerLogin || ownerLogin !== repoOwner) {
+        return res.status(400).json({
+          success: false,
+          message: 'You can only link a repository that you own'
+        });
+      }
     }
 
     // Check if repo is already used by another active project
@@ -126,6 +169,29 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
+// READ: Get current user's pending join requests (applicant side)
+router.get('/my-requests', requireAuth, async (req, res) => {
+  try {
+    const requests = await joinRequestDb.getByUserId(req.session.userId);
+    res.json({ success: true, requests });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// CANCEL: Withdraw own pending join request
+router.delete('/my-requests/:requestId', requireAuth, async (req, res) => {
+  try {
+    const cancelled = await joinRequestDb.cancelRequest(req.params.requestId, req.session.userId);
+    if (!cancelled) {
+      return res.status(404).json({ success: false, message: 'Request not found or already processed' });
+    }
+    res.json({ success: true, message: 'Request cancelled' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // READ: Get discover projects (PUBLIC - no auth required, but filters if logged in)
 router.get('/discover', async (req, res) => {
   try {
@@ -178,25 +244,24 @@ router.get('/:id', paramIdValidation, async (req, res) => {
   }
 });
 
-// UPDATE: Update project
-router.put('/:id', requireAuth, paramIdValidation, updateProjectValidation, async (req, res) => {
+// UPDATE: Update project (creator or moderator)
+router.put('/:id', requireAuth, paramIdValidation, updateProjectValidation, requireManagement, async (req, res) => {
   try {
     const { name, description, tags, lookingFor, recruitmentOpen } = req.body;
+    const project = req.project;
 
-    // Update project (ownership check in projectDb.update)
-    // github_repo and project_type are immutable after creation
-    const success = await projectDb.update(req.params.id, req.session.userId, {
-      name,
-      description,
-      tags,
-      lookingFor,
-      recruitmentOpen
-    });
+    // Bypass creator_id check in projectDb.update by running the query directly via pool
+    const { rowCount } = await pool.query(
+      `UPDATE projects
+       SET name = $1, description = $2, tags = $3, looking_for = $4, recruitment_open = $5, updated_at = NOW()
+       WHERE id = $6 AND project_status = 'active'`,
+      [name, description, JSON.stringify(tags), JSON.stringify(lookingFor), recruitmentOpen, project.id]
+    );
 
-    if (!success) {
+    if (rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Project not found or unauthorized'
+        message: 'Project not found or not active'
       });
     }
 
@@ -214,24 +279,28 @@ router.put('/:id', requireAuth, paramIdValidation, updateProjectValidation, asyn
   }
 });
 
-// PATCH: Toggle recruitment status
-router.patch('/:id/recruitment', requireAuth, paramIdValidation, async (req, res) => {
+// PATCH: Toggle recruitment status (creator or moderator)
+router.patch('/:id/recruitment', requireAuth, paramIdValidation, requireManagement, async (req, res) => {
   try {
-    const success = await projectDb.toggleRecruitment(req.params.id, req.session.userId);
+    const project = req.project;
 
-    if (!success) {
+    const { rowCount } = await pool.query(
+      `UPDATE projects SET recruitment_open = $1, updated_at = NOW()
+       WHERE id = $2 AND project_status = 'active'`,
+      [!project.recruitmentOpen, project.id]
+    );
+
+    if (rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Project not found or unauthorized'
+        message: 'Project not found or not active'
       });
     }
-
-    const project = await projectDb.findById(req.params.id);
 
     res.json({
       success: true,
       message: 'Recruitment status updated',
-      recruitment_open: project.recruitmentOpen
+      recruitment_open: !project.recruitmentOpen
     });
 
   } catch (error) {
@@ -331,6 +400,28 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
         });
       }
       snapshotGithubId = githubInfo.github_id;
+
+      // Block if this GitHub account was previously a member (kicked or left) under any PtahNest user
+      const { rows: githubMemberRows } = await pool.query(
+        `SELECT membership_status FROM project_members WHERE project_id = $1 AND github_id = $2`,
+        [projectId, snapshotGithubId]
+      );
+      if (githubMemberRows.length > 0) {
+        const status = githubMemberRows[0].membership_status;
+        const msg = status === 'kicked'
+          ? 'This GitHub account was removed from this project and cannot rejoin.'
+          : 'This GitHub account has already been part of this project.';
+        return res.status(400).json({ success: false, message: msg });
+      }
+
+      // Block if this GitHub account has a pending/accepted join request under any PtahNest user
+      const { rows: githubRequestRows } = await pool.query(
+        `SELECT status FROM join_requests WHERE project_id = $1 AND github_id = $2 AND status IN ('pending', 'accepted')`,
+        [projectId, snapshotGithubId]
+      );
+      if (githubRequestRows.length > 0) {
+        return res.status(400).json({ success: false, message: 'This GitHub account already has an active request for this project.' });
+      }
     }
 
     // Check if user is already a member
@@ -343,20 +434,28 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
 
     // Check if user has left or been kicked
     const { rows: pastRows } = await pool.query(
-      `SELECT membership_status FROM project_members WHERE project_id = $1 AND user_id = $2 AND membership_status IN ('left', 'kicked')`,
+      `SELECT membership_status, left_at FROM project_members WHERE project_id = $1 AND user_id = $2 AND membership_status IN ('left', 'kicked')`,
       [projectId, userId]
     );
     const pastMembership = pastRows[0] || null;
 
     if (pastMembership) {
-      const message = pastMembership.membership_status === 'kicked'
-        ? 'You were removed from this project and cannot rejoin.'
-        : 'You have already left this project. Please contact the project creator to rejoin.';
-
-      return res.status(400).json({
-        success: false,
-        message
-      });
+      if (pastMembership.membership_status === 'kicked') {
+        return res.status(400).json({
+          success: false,
+          message: 'You were removed from this project and cannot rejoin.'
+        });
+      }
+      // Left: 30-day cooldown
+      const leftAt = new Date(pastMembership.left_at);
+      const cooldownEnd = new Date(leftAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+      if (new Date() < cooldownEnd) {
+        const daysLeft = Math.ceil((cooldownEnd - new Date()) / (1000 * 60 * 60 * 24));
+        return res.status(400).json({
+          success: false,
+          message: `You left this project. You can reapply in ${daysLeft} day${daysLeft === 1 ? '' : 's'}.`
+        });
+      }
     }
 
     // Check if user already has a pending request
@@ -400,30 +499,10 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
   }
 });
 
-// GET: Get all join requests for a project (creator only)
-router.get('/:id/requests', requireAuth, paramIdValidation, async (req, res) => {
+// GET: Get all join requests for a project (creator or moderator)
+router.get('/:id/requests', requireAuth, paramIdValidation, requireManagement, async (req, res) => {
   try {
-    const projectId = req.params.id;
-    const userId = req.session.userId;
-
-    // Check if project exists
-    const project = await projectDb.findById(projectId);
-    if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: 'Project not found'
-      });
-    }
-
-    // Check if user is the creator
-    if (project.creator_id !== userId) {
-      return res.status(403).json({
-        success: false,
-        message: 'Only project creator can view join requests'
-      });
-    }
-
-    const requests = await joinRequestDb.getPendingRequests(projectId);
+    const requests = await joinRequestDb.getPendingRequests(req.params.id);
 
     res.json({
       success: true,
@@ -439,30 +518,13 @@ router.get('/:id/requests', requireAuth, paramIdValidation, async (req, res) => 
   }
 });
 
-// PATCH: Accept/reject join request
-router.patch('/:id/requests/:requestId', requireAuth, paramIdValidation, paramRequestIdValidation, manageRequestValidation, async (req, res) => {
+// PATCH: Accept/reject join request (creator or moderator)
+router.patch('/:id/requests/:requestId', requireAuth, paramIdValidation, paramRequestIdValidation, manageRequestValidation, requireManagement, async (req, res) => {
   try {
     const projectId = req.params.id;
     const requestId = req.params.requestId;
-    const userId = req.session.userId;
     const { action } = req.body; // 'accept' or 'reject'
-
-    // Check if project exists
-    const project = await projectDb.findById(projectId);
-    if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: 'Project not found'
-      });
-    }
-
-    // Check if user is the creator
-    if (project.creator_id !== userId) {
-      return res.status(403).json({
-        success: false,
-        message: 'Only project creator can manage join requests'
-      });
-    }
+    const project = req.project;
 
     // Get join request
     const joinRequest = await joinRequestDb.findById(requestId);
@@ -482,8 +544,9 @@ router.patch('/:id/requests/:requestId', requireAuth, paramIdValidation, paramRe
     }
 
     if (action === 'accept') {
-      // Accept request and add user as member (pass snapshot github_id)
+      // Accept request, delete chat messages, add user as member
       await joinRequestDb.accept(requestId);
+      await joinRequestMessageDb.deleteByRequestId(requestId);
       await memberDb.addMember(projectId, joinRequest.user_id, 'member', joinRequest.github_id || null);
 
       // Send GitHub collaborator invite if software project has a linked repo
@@ -497,8 +560,9 @@ router.patch('/:id/requests/:requestId', requireAuth, paramIdValidation, paramRe
         githubInvite
       });
     } else if (action === 'reject') {
-      // Reject request
+      // Reject request and delete chat messages
       await joinRequestDb.reject(requestId);
+      await joinRequestMessageDb.deleteByRequestId(requestId);
 
       res.json({
         success: true,
@@ -560,47 +624,7 @@ router.get('/:id/members', requireAuth, paramIdValidation, async (req, res) => {
   }
 });
 
-// DELETE: Kick member from project (creator only)
-router.delete('/:id/members/:memberId', requireAuth, paramIdValidation, paramMemberIdValidation, async (req, res) => {
-  try {
-    const projectId = req.params.id;
-    const memberId = req.params.memberId;
-    const userId = req.session.userId;
-
-    // Check if project exists and is active
-    const project = await projectDb.findById(projectId);
-    if (!project || project.project_status !== 'active') {
-      return res.status(404).json({ success: false, message: 'Project not found or not active' });
-    }
-
-    // Only creator can kick members
-    if (project.creator_id !== userId) {
-      return res.status(403).json({ success: false, message: 'Only project creator can kick members' });
-    }
-
-    // Kick the member
-    const kickResult = await memberDb.kickMember(projectId, memberId);
-    if (!kickResult) {
-      return res.status(400).json({ success: false, message: 'Member not found or cannot be kicked' });
-    }
-
-    // Remove GitHub collaborator for software projects
-    let githubRemoval = null;
-    if (project.projectType === 'software' && project.github_repo && kickResult.githubId) {
-      githubRemoval = await removeGithubCollaborator(kickResult.githubId, project.github_repo, project.creator_id);
-    }
-
-    res.json({
-      success: true,
-      message: 'Member has been kicked from the project',
-      githubRemoval
-    });
-
-  } catch (error) {
-    console.error('Kick member error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
+// Direct kick endpoint removed — use kick voting system (POST /:id/kick-votes)
 
 // DELETE: Leave project (member self-removal)
 router.delete('/:id/leave', requireAuth, paramIdValidation, async (req, res) => {
@@ -647,6 +671,414 @@ router.delete('/:id/leave', requireAuth, paramIdValidation, async (req, res) => 
       success: false,
       message: 'Server error'
     });
+  }
+});
+
+// POST: Promote member to moderator (creator only)
+router.post('/:id/moderators', requireAuth, paramIdValidation, moderatorValidation, async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const project = await projectDb.findById(req.params.id);
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    if (project.creator_id !== req.session.userId) {
+      return res.status(403).json({ success: false, message: 'Only project creator can assign moderators' });
+    }
+
+    // Cannot promote yourself or the creator
+    if (userId === req.session.userId) {
+      return res.status(400).json({ success: false, message: 'You are already the creator' });
+    }
+
+    const success = await memberDb.setRole(req.params.id, userId, 'moderator');
+    if (!success) {
+      return res.status(400).json({ success: false, message: 'Member not found or is already moderator/creator' });
+    }
+
+    res.json({ success: true, message: 'Member promoted to moderator' });
+  } catch (error) {
+    console.error('Promote moderator error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// DELETE: Demote moderator back to member (creator only)
+router.delete('/:id/moderators/:memberId', requireAuth, paramIdValidation, paramMemberIdValidation, async (req, res) => {
+  try {
+    const project = await projectDb.findById(req.params.id);
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    if (project.creator_id !== req.session.userId) {
+      return res.status(403).json({ success: false, message: 'Only project creator can remove moderators' });
+    }
+
+    const success = await memberDb.setRole(req.params.id, req.params.memberId, 'member');
+    if (!success) {
+      return res.status(400).json({ success: false, message: 'Member not found or cannot be demoted' });
+    }
+
+    res.json({ success: true, message: 'Moderator demoted to member' });
+  } catch (error) {
+    console.error('Demote moderator error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// --- KICK VOTING ---
+
+// Helper: resolve a vote if threshold met or expired, returns updated status
+async function resolveVoteIfNeeded(vote, project) {
+  if (vote.status !== 'open') return vote;
+
+  const now = new Date();
+  const expired = new Date(vote.expires_at) < now;
+  const totalMembers = await pool.query(
+    `SELECT COUNT(*) as count FROM project_members
+     WHERE project_id = $1 AND membership_status = 'active' AND user_id != $2`,
+    [vote.project_id, vote.target_user_id]
+  );
+  const total = Number(totalMembers.rows[0].count);
+  const yesCount = Number(vote.yes_count || 0);
+
+  const threshold = total > 0 ? yesCount / total : 0;
+  const passed = total > 0 && threshold >= 0.70;
+
+  if (passed) {
+    await kickVoteDb.resolve(vote.id, 'passed');
+    // Execute the kick
+    const kickResult = await memberDb.kickMember(vote.project_id, vote.target_user_id);
+    if (kickResult && project.projectType === 'software' && project.github_repo && kickResult.githubId) {
+      await removeGithubCollaborator(kickResult.githubId, project.github_repo, project.creator_id);
+    }
+    return { ...vote, status: 'passed' };
+  }
+
+  if (expired) {
+    await kickVoteDb.resolve(vote.id, 'failed');
+    return { ...vote, status: 'failed' };
+  }
+
+  return vote;
+}
+
+// POST: Start a kick vote (creator or moderator)
+router.post('/:id/kick-votes', requireAuth, paramIdValidation, kickVoteValidation, requireManagement, async (req, res) => {
+  try {
+    const { targetUserId } = req.body;
+    const project = req.project;
+
+    // Cannot kick creator
+    if (targetUserId === project.creator_id) {
+      return res.status(400).json({ success: false, message: 'Cannot start a kick vote against the project creator' });
+    }
+
+    // Cannot kick yourself
+    if (targetUserId === req.session.userId) {
+      return res.status(400).json({ success: false, message: 'Cannot start a kick vote against yourself' });
+    }
+
+    // Target must be active member
+    if (!await memberDb.isMember(project.id, targetUserId)) {
+      return res.status(400).json({ success: false, message: 'Target user is not an active member of this project' });
+    }
+
+    // Check if open vote already exists for this target
+    const existing = await kickVoteDb.getOpenVote(project.id, targetUserId);
+    if (existing) {
+      return res.status(409).json({ success: false, message: 'An open kick vote already exists for this member' });
+    }
+
+    const vote = await kickVoteDb.create(project.id, targetUserId, req.session.userId);
+
+    res.status(201).json({ success: true, message: 'Kick vote started', vote });
+  } catch (error) {
+    console.error('Start kick vote error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET: List all kick votes for a project (active members only)
+router.get('/:id/kick-votes', requireAuth, paramIdValidation, async (req, res) => {
+  try {
+    const projectId = req.params.id;
+    const userId = req.session.userId;
+
+    const project = await projectDb.findById(projectId);
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    // Must be active member or creator
+    if (project.creator_id !== userId && !await memberDb.isMember(projectId, userId)) {
+      return res.status(403).json({ success: false, message: 'You must be a project member to view kick votes' });
+    }
+
+    let votes = await kickVoteDb.getVotesForProject(projectId);
+
+    // Lazy-resolve open votes
+    votes = await Promise.all(votes.map(v => resolveVoteIfNeeded(v, project)));
+
+    // Attach current user's ballot for each vote
+    const withBallots = await Promise.all(votes.map(async v => ({
+      ...v,
+      myBallot: v.status === 'open' ? await kickVoteDb.getBallot(v.id, userId) : null
+    })));
+
+    res.json({ success: true, votes: withBallots });
+  } catch (error) {
+    console.error('Get kick votes error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST: Cast a ballot on a kick vote
+router.post('/:id/kick-votes/:voteId/ballot', requireAuth, paramIdValidation, paramVoteIdValidation, ballotValidation, async (req, res) => {
+  try {
+    const { ballot } = req.body;
+    const userId = req.session.userId;
+    const projectId = req.params.id;
+
+    const project = await projectDb.findById(projectId);
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    // Must be active member — fetch with joined_at for eligibility check
+    const { rows: memberRows } = await pool.query(
+      `SELECT joined_at FROM project_members WHERE project_id = $1 AND user_id = $2 AND membership_status = 'active'`,
+      [projectId, userId]
+    );
+    const isCreator = project.creator_id === userId;
+    if (!isCreator && memberRows.length === 0) {
+      return res.status(403).json({ success: false, message: 'You must be a project member to vote' });
+    }
+
+    const vote = await kickVoteDb.findById(req.params.voteId);
+    if (!vote || vote.project_id !== projectId) {
+      return res.status(404).json({ success: false, message: 'Vote not found' });
+    }
+
+    // Members who joined after the vote started cannot vote
+    if (!isCreator && memberRows[0].joined_at > vote.created_at) {
+      return res.status(403).json({ success: false, message: 'You joined after this vote started and cannot participate' });
+    }
+
+    if (vote.status !== 'open') {
+      return res.status(400).json({ success: false, message: 'This vote is already closed' });
+    }
+
+    // Target cannot vote on their own kick
+    if (vote.target_user_id === userId) {
+      return res.status(403).json({ success: false, message: 'You cannot vote on your own kick' });
+    }
+
+    // Already voted — no changes allowed
+    const { rows: existingBallot } = await pool.query(
+      'SELECT id FROM kick_vote_ballots WHERE vote_id = $1 AND voter_user_id = $2',
+      [vote.id, userId]
+    );
+    if (existingBallot.length > 0) {
+      return res.status(400).json({ success: false, message: 'You have already voted and cannot change your vote' });
+    }
+
+    // Check if expired before accepting vote
+    if (new Date(vote.expires_at) < new Date()) {
+      await kickVoteDb.resolve(vote.id, 'failed');
+      return res.status(400).json({ success: false, message: 'This vote has expired' });
+    }
+
+    await kickVoteDb.castBallot(vote.id, userId, ballot);
+
+    // Re-fetch with updated counts for early resolution check
+    const updatedVote = await kickVoteDb.findById(vote.id);
+    const resolved = await resolveVoteIfNeeded(updatedVote, project);
+
+    res.json({
+      success: true,
+      message: 'Ballot cast successfully',
+      voteStatus: resolved.status
+    });
+  } catch (error) {
+    console.error('Cast ballot error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST: Cancel a kick vote (creator only)
+router.post('/:id/kick-votes/:voteId/cancel', requireAuth, paramIdValidation, paramVoteIdValidation, async (req, res) => {
+  try {
+    const project = await projectDb.findById(req.params.id);
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    if (project.creator_id !== req.session.userId) {
+      return res.status(403).json({ success: false, message: 'Only project creator can cancel a kick vote' });
+    }
+
+    const vote = await kickVoteDb.findById(req.params.voteId);
+    if (!vote || vote.project_id !== req.params.id) {
+      return res.status(404).json({ success: false, message: 'Vote not found' });
+    }
+
+    if (vote.status !== 'open') {
+      return res.status(400).json({ success: false, message: 'Vote is already closed' });
+    }
+
+    await kickVoteDb.resolve(vote.id, 'cancelled');
+
+    res.json({ success: true, message: 'Kick vote cancelled' });
+  } catch (error) {
+    console.error('Cancel kick vote error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET: Pending kick votes for current user (for notification bell)
+router.get('/me/kick-votes/pending', requireAuth, async (req, res) => {
+  try {
+    const votes = await kickVoteDb.getPendingForUser(req.session.userId);
+    res.json({ success: true, votes });
+  } catch (error) {
+    console.error('Get pending kick votes error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ========================================
+// JOIN REQUEST CHAT
+// ========================================
+
+// Middleware: allow request participant (applicant) or management (mod/creator)
+async function requireRequestParticipant(req, res, next) {
+  try {
+    const requestId = req.params.requestId;
+    const joinRequest = await joinRequestDb.findById(requestId);
+    if (!joinRequest) return res.status(404).json({ success: false, message: 'Request not found' });
+
+    const userId = req.session.userId;
+    // Applicant can access their own request
+    if (joinRequest.user_id === userId) return next();
+
+    // Management can access via requireManagement logic
+    const project = await projectDb.findById(req.params.id, userId);
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+    const role = project.role;
+    if (role === 'creator' || role === 'moderator') return next();
+
+    return res.status(403).json({ success: false, message: 'Access denied' });
+  } catch (err) {
+    console.error('requireRequestParticipant error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+}
+
+// POST: Send a chat message on a join request
+router.post('/:id/requests/:requestId/messages', requireAuth, paramIdValidation, paramRequestIdValidation, messageContentValidation, requireRequestParticipant, async (req, res) => {
+  try {
+    const { content } = req.body;
+    const encrypted = encrypt(content);
+    await joinRequestMessageDb.create(req.params.requestId, req.session.userId, encrypted);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Send request message error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET: Fetch chat messages for a join request
+router.get('/:id/requests/:requestId/messages', requireAuth, paramIdValidation, paramRequestIdValidation, requireRequestParticipant, async (req, res) => {
+  try {
+    const rows = await joinRequestMessageDb.getByRequestId(req.params.requestId);
+    const messages = rows.map(m => ({
+      id: m.id,
+      sender_id: m.sender_id,
+      sender_username: m.sender_username,
+      sender_role: m.sender_role || null,
+      content: decrypt(m.encrypted_content),
+      created_at: m.created_at
+    }));
+    res.json({ success: true, messages });
+  } catch (error) {
+    console.error('Get request messages error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ========================================
+// PUBLIC USER PROFILE
+// ========================================
+
+// GET: Public profile for join request preview
+router.get('/users/:userId/profile', requireAuth, paramUserIdValidation, async (req, res) => {
+  try {
+    const profile = await userDb.getPublicProfile(req.params.userId, req.session.userId);
+    if (!profile) return res.status(404).json({ success: false, message: 'User not found' });
+    res.json({ success: true, profile });
+  } catch (error) {
+    console.error('Get public profile error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET: Project health diagnostics (creator + moderator only)
+router.get('/:id/health', requireAuth, paramIdValidation, requireManagement, async (req, res) => {
+  try {
+    const projectId = req.params.id;
+    const project = await projectDb.findById(projectId, req.session.userId);
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    const issues = [];
+    const isSoftware = project.projectType === 'software';
+
+    // #1 Invite not sent (software only)
+    if (isSoftware) {
+      const notSent = await memberDb.getInviteNotSent(projectId);
+      for (const m of notSent) {
+        issues.push({ type: 'invite_not_sent', userId: m.user_id, username: m.username });
+      }
+    }
+
+    // #2 Invite stuck > 7 days (software only)
+    if (isSoftware) {
+      const stuck = await memberDb.getInviteStuck(projectId);
+      for (const m of stuck) {
+        const days = Math.floor((Date.now() - new Date(m.github_invited_at)) / 86400000);
+        issues.push({ type: 'invite_stuck', userId: m.user_id, username: m.username, days });
+      }
+    }
+
+    // #3 Expired open kick votes
+    const expiredVotes = await kickVoteDb.getExpiredOpen(projectId);
+    for (const v of expiredVotes) {
+      issues.push({ type: 'vote_expired', voteId: v.id, targetUsername: v.target_username });
+    }
+
+    // #4 Not a GitHub collaborator (software only, requires creator token)
+    if (isSoftware && project.githubRepo) {
+      const creatorRow = await pool.query(
+        'SELECT github_token FROM users WHERE id = $1', [project.creator_id]
+      );
+      const encryptedToken = creatorRow.rows[0]?.github_token;
+      if (encryptedToken) {
+        const token = decrypt(encryptedToken);
+        const accepted = await memberDb.getAcceptedMembers(projectId);
+
+        for (const m of accepted) {
+          if (!m.github_id) continue;
+          try {
+            const username = await resolveGithubUsername(m.github_id);
+            if (!username) continue;
+            const checkRes = await fetch(
+              `https://api.github.com/repos/${project.githubRepo}/collaborators/${username}`,
+              { headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' } }
+            );
+            if (checkRes.status === 404) {
+              issues.push({ type: 'not_collaborator', userId: m.user_id, username: m.username });
+            }
+          } catch { /* skip individual member on error */ }
+        }
+      }
+    }
+
+    res.json({ success: true, issues });
+  } catch (err) {
+    console.error('Health check error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 

@@ -127,8 +127,8 @@ router.get('/repos', requireAuth, async (req, res) => {
     // Decrypt stored token
     const accessToken = decrypt(info.github_token);
 
-    // Fetch repos from GitHub API
-    const response = await fetch('https://api.github.com/user/repos?per_page=100&sort=updated', {
+    // Fetch only repos owned by the user (excludes collaborator/organization repos)
+    const response = await fetch('https://api.github.com/user/repos?affiliation=owner&per_page=100&sort=updated', {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Accept': 'application/vnd.github+json'
@@ -141,11 +141,14 @@ router.get('/repos', requireAuth, async (req, res) => {
 
     const repos = await response.json();
 
-    // Return only needed fields
-    const repoList = repos.map(repo => ({
-      full_name: repo.full_name,
-      private: repo.private
-    }));
+    // Defensive owner filter in case API param is ignored
+    const ownerLogin = (info.github_username || '').toLowerCase();
+    const repoList = repos
+      .filter(repo => repo.owner && repo.owner.login && repo.owner.login.toLowerCase() === ownerLogin)
+      .map(repo => ({
+        full_name: repo.full_name,
+        private: repo.private
+      }));
 
     res.json({ success: true, repos: repoList });
   } catch (error) {
@@ -439,7 +442,7 @@ router.post('/unlink', requireAuth, async (req, res) => {
     const names = creatorProjects.map(p => p.name).join(', ');
     return res.status(400).json({
       success: false,
-      message: `You are the creator of active software project(s): ${names}. Delete or transfer these projects before unlinking GitHub.`,
+      message: `You are the creator of active software project(s): ${names}. Complete or delete these projects before unlinking GitHub.`,
       blockedByCreator: true
     });
   }
@@ -452,3 +455,4 @@ module.exports = router;
 module.exports.sendCollaboratorInvite = sendCollaboratorInvite;
 module.exports.createGithubRepo = createGithubRepo;
 module.exports.removeGithubCollaborator = removeGithubCollaborator;
+module.exports.resolveGithubUsername = resolveGithubUsername;

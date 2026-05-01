@@ -34,7 +34,7 @@
                             <span class="notif-badge" id="notifBadge">0</span>
                         </button>
                         <div class="notif-panel" id="notifPanel">
-                            <div class="notif-panel-header">Join Requests</div>
+                            <div class="notif-panel-header">Notifications</div>
                             <div class="notif-panel-body" id="notifPanelBody"></div>
                         </div>
                     </div>
@@ -68,47 +68,346 @@
         </div>
     </header>
 
-    <main class="layout-dashboard main-content">
+    <main class="layout-dashboard main-content project-detail-page">
         <!-- Back button -->
         <div class="back-button-container">
-            <button class="btn btn-outline" onclick="window.history.back()">
+            <button class="btn btn-outline" onclick="window.location.href='/pages/projects.html'">
                 ← Back to Projects
             </button>
         </div>
 
-        <!-- Project Header Section -->
+        <!-- Project Header Section (always visible) -->
         <section id="projectHeader">
             <!-- Dynamically populated -->
         </section>
 
-        <!-- Project Details Section -->
-        <section id="projectDetails" class="card section-spacing-top">
-            <!-- Dynamically populated -->
-        </section>
+        <!-- Tab Bar (injected by JS when user has management role) -->
+        <div id="tabBar" style="display: none;" class="section-spacing-top">
+            <div class="project-tabs">
+                <button class="tab-btn active" id="overviewTab" onclick="switchDetailTab('overview')">Overview <span class="tab-dot" id="overviewDot" style="display:none;"></span></button>
+                <button class="tab-btn" id="adminTab" onclick="switchDetailTab('admin')">Admin Panel <span class="tab-dot" id="adminDot" style="display:none;"></span></button>
+            </div>
+        </div>
 
-        <!-- Members Section -->
-        <section id="membersSection" class="section-spacing-top">
-            <h2 class="section-heading">Team Members</h2>
-            <div id="membersContainer">
+        <!-- OVERVIEW TAB CONTENT -->
+        <div id="overviewContent" class="tab-content active">
+            <!-- Project Details Section -->
+            <section id="projectDetails" class="card section-spacing-top">
                 <!-- Dynamically populated -->
-            </div>
-        </section>
+            </section>
 
-        <!-- Commits Section -->
-        <section id="commitsSection" class="section-spacing-top" style="display: none;">
-            <h2 class="section-heading">Commit History</h2>
-            <div id="commitsContainer">
-                <!-- Dynamically populated -->
-            </div>
-            <div id="commitsPagination" class="pagination">
-                <!-- Pagination buttons -->
-            </div>
-        </section>
+            <!-- Commits Section -->
+            <section id="commitsSection" class="section-spacing-top" style="display: none;">
+                <div class="collapsible-heading" onclick="toggleCommits()">
+                    <h2 class="section-heading section-heading-gold">
+                        <span class="gold-star">★</span>
+                        Commit History
+                        <span class="gold-star">★</span>
+                    </h2>
+                    <span class="collapsible-chevron" id="commitsChevron">▾</span>
+                </div>
+                <div id="commitsPanel" class="health-panel">
+                    <div id="commitsContainer">
+                        <!-- Dynamically populated -->
+                    </div>
+                    <div id="commitsPagination">
+                        <!-- Pagination buttons -->
+                    </div>
+                </div>
+            </section>
 
-        <!-- Action Buttons Section -->
-        <section id="actionsSection" class="section-spacing-top">
-            <!-- Dynamically populated based on role -->
-        </section>
+            <!-- Members Section -->
+            <section id="membersSection" class="section-spacing-top">
+                <div class="collapsible-heading" onclick="toggleTeamMembers()">
+                    <h2 class="section-heading">
+                        <span class="health-status-dot"></span>
+                        Team Members
+                    </h2>
+                    <span class="collapsible-chevron" id="teamMembersChevron">▾</span>
+                </div>
+                <div id="teamMembersPanel" class="health-panel">
+                    <div id="membersContainer">
+                        <!-- Dynamically populated -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Active Kick Votes (visible to all members) -->
+            <section id="activeVotesSection" class="section-spacing-top" style="display: none;">
+                <div class="collapsible-heading" onclick="toggleOverviewActiveKicks()">
+                    <h2 class="section-heading">
+                        <span class="health-status-dot"></span>
+                        Active Kick Votes
+                    </h2>
+                    <span class="collapsible-chevron" id="overviewActiveKicksChevron">▾</span>
+                </div>
+                <div id="overviewActiveKicksPanel" class="health-panel">
+                    <div id="activeVotesContainer"></div>
+                </div>
+            </section>
+
+            <!-- Action Buttons Section -->
+            <section id="actionsSection" class="section-spacing-top">
+                <!-- Dynamically populated based on role -->
+            </section>
+        </div>
+
+        <!-- ADMIN PANEL TAB CONTENT -->
+        <div id="adminContent" class="tab-content">
+            <!-- Block 0: Project Health (collapsible) -->
+            <section class="section-spacing-top">
+                <div class="collapsible-heading" onclick="toggleHealth()">
+                    <h2 class="section-heading">
+                        <span id="healthStatusDot" class="health-status-dot"></span>
+                        Project Health
+                    </h2>
+                    <span class="collapsible-chevron" id="healthChevron">▾</span>
+                </div>
+                <div id="healthPanel" class="health-panel">
+                    <div id="healthContainer">
+                        <p class="text-muted">Loading...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Block 1: Pending Join Requests -->
+            <section class="section-spacing-top">
+                <div class="collapsible-heading" onclick="toggleRequests()">
+                    <h2 class="section-heading">
+                        <span id="requestsStatusDot" class="health-status-dot"></span>
+                        Pending Join Requests
+                    </h2>
+                    <span class="collapsible-chevron" id="requestsChevron">▾</span>
+                </div>
+                <div id="requestsPanel" class="health-panel">
+                    <div id="adminRequestsContainer">
+                        <p class="text-muted">Loading...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Block 2: Moderator Management (creator only) -->
+            <section id="moderatorSection" class="section-spacing-top" style="display: none;">
+                <div class="collapsible-heading" onclick="toggleModerators()">
+                    <h2 class="section-heading">
+                        <span class="health-status-dot"></span>
+                        Moderators
+                    </h2>
+                    <span class="collapsible-chevron" id="moderatorsChevron">▾</span>
+                </div>
+                <div id="moderatorsPanel" class="health-panel">
+                    <div id="moderatorContainer">
+                        <p class="text-muted">Loading...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Block 3: Kick Voting -->
+            <section class="section-spacing-top">
+                <div class="flex-between-center section-toolbar">
+                    <h2 class="section-heading">Kick Votes</h2>
+                    <button class="btn btn-outline btn-danger btn-sm" onclick="openStartKickVoteModal()">+ Start Kick Vote</button>
+                </div>
+
+                <!-- Active (open) votes -->
+                <div class="collapsible-heading" onclick="toggleActiveKicks()">
+                    <h3 class="section-heading section-heading-sub">
+                        <span class="health-status-dot"></span>
+                        Active Kick Votes
+                    </h3>
+                    <span class="collapsible-chevron" id="activeKicksChevron">▾</span>
+                </div>
+                <div id="activeKicksPanel" class="health-panel">
+                    <div id="activeKicksContainer">
+                        <p class="text-muted">Loading...</p>
+                    </div>
+                </div>
+
+                <!-- Past (history) votes -->
+                <div class="collapsible-heading collapsible-heading-spaced" onclick="togglePastKicks()">
+                    <h3 class="section-heading section-heading-sub">
+                        <span class="health-status-dot"></span>
+                        Past Kick Votes
+                    </h3>
+                    <span class="collapsible-chevron" id="pastKicksChevron">▾</span>
+                </div>
+                <div id="pastKicksPanel" class="health-panel">
+                    <div id="pastKicksContainer">
+                        <p class="text-muted">Loading...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Block 4: Quick Settings (moved to bottom) -->
+            <section class="section-spacing-top">
+                <h2 class="section-heading">Quick Settings</h2>
+                <div class="mod-tables-grid">
+                    <!-- Recruitment card -->
+                    <div class="card quick-card">
+                        <div class="mod-table-header">Recruitment</div>
+                        <div class="quick-card-row">
+                            <span id="adminRecruitStatus" class="quick-card-status"></span>
+                            <button class="btn btn-outline btn-sm" id="adminRecruitBtn" onclick="adminToggleRecruitment()">Toggle</button>
+                        </div>
+                        <p class="text-muted quick-card-hint">Controls whether new members can apply to join.</p>
+                    </div>
+                    <!-- Edit project card -->
+                    <div class="card quick-card-stack">
+                        <div class="mod-table-header">Project Details</div>
+                        <p class="text-muted quick-card-desc">Edit name, description, tags and roles. Complete or delete the project from within the form.</p>
+                        <button class="btn btn-primary btn-sm quick-card-action" onclick="editProject()">Edit Project</button>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+
+        <!-- Edit Project Modal -->
+        <div class="modal-overlay modal-overlay-hidden" id="editModal">
+            <div class="modal-content">
+                <button class="modal-close" id="closeEditModal">&times;</button>
+                <div class="card-title modal-title">Edit Project</div>
+
+                <form id="editProjectForm">
+                    <input type="hidden" id="editProjectId">
+                    <input type="hidden" id="editProjectType" value="software">
+
+                    <div class="input-group">
+                        <label class="input-label" for="editProjectName">Project Name</label>
+                        <input type="text" id="editProjectName" class="input-field" placeholder="Enter project name" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label" for="editProjectDescription">Description</label>
+                        <textarea id="editProjectDescription" class="input-field" rows="3" placeholder="Brief project description" required></textarea>
+                    </div>
+
+                    <input type="hidden" id="editGithubRepo" value="">
+
+                    <div class="input-group">
+                        <label class="input-label">Tags</label>
+                        <div class="tag-buttons-wrapper" id="editPresetTagsGroup">
+                            <button type="button" class="edit-tag-btn tag-btn" data-tag="Frontend">Frontend</button>
+                            <button type="button" class="edit-tag-btn tag-btn" data-tag="Backend">Backend</button>
+                            <button type="button" class="edit-tag-btn tag-btn" data-tag="Mobile">Mobile</button>
+                            <button type="button" class="edit-tag-btn tag-btn" data-tag="Design">Design</button>
+                            <button type="button" class="edit-tag-btn tag-btn" data-tag="AI/ML">AI/ML</button>
+                            <button type="button" class="edit-tag-btn tag-btn" data-tag="DevOps">DevOps</button>
+                        </div>
+                        <input type="text" id="editCustomTags" class="input-field" placeholder="Add custom tags (comma separated)">
+                    </div>
+
+                    <div class="input-group" id="editLookingForGroup">
+                        <label class="input-label">Looking For (Roles)</label>
+                        <div class="role-checkboxes-grid">
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="editRoleFrontend" class="edit-role-checkbox checkbox" value="Frontend Developer">
+                                <label for="editRoleFrontend" class="checkbox-label">Frontend Developer</label>
+                            </div>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="editRoleBackend" class="edit-role-checkbox checkbox" value="Backend Developer">
+                                <label for="editRoleBackend" class="checkbox-label">Backend Developer</label>
+                            </div>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="editRoleFullstack" class="edit-role-checkbox checkbox" value="Fullstack Developer">
+                                <label for="editRoleFullstack" class="checkbox-label">Fullstack Developer</label>
+                            </div>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="editRoleDesigner" class="edit-role-checkbox checkbox" value="UI/UX Designer">
+                                <label for="editRoleDesigner" class="checkbox-label">UI/UX Designer</label>
+                            </div>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="editRoleMobile" class="edit-role-checkbox checkbox" value="Mobile Developer">
+                                <label for="editRoleMobile" class="checkbox-label">Mobile Developer</label>
+                            </div>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="editRoleDevOps" class="edit-role-checkbox checkbox" value="DevOps Engineer">
+                                <label for="editRoleDevOps" class="checkbox-label">DevOps Engineer</label>
+                            </div>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="editRoleQA" class="edit-role-checkbox checkbox" value="QA Tester">
+                                <label for="editRoleQA" class="checkbox-label">QA Tester</label>
+                            </div>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="editRolePM" class="edit-role-checkbox checkbox" value="Project Manager">
+                                <label for="editRolePM" class="checkbox-label">Project Manager</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label">Recruitment</label>
+                        <p class="text-muted edit-recruit-hint">Currently: <strong id="editRecruitStatusLabel"></strong> — toggle from Quick Settings in the Admin Panel.</p>
+                        <input type="hidden" id="editRecruitmentOpen" value="true">
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                        <button type="button" class="btn btn-outline" id="cancelEditBtn">Cancel</button>
+                    </div>
+
+                    <!-- Complete + Delete section, only visible for creator -->
+                    <div class="edit-modal-delete" id="editDeleteSection" style="display: none;">
+                        <hr class="modal-divider">
+                        <button type="button" class="btn btn-outline btn-success btn-full" id="editCompleteBtn">Complete Project</button>
+                        <div class="danger-zone">
+                            <div class="danger-zone-header">Danger Zone</div>
+                            <p class="danger-zone-desc">
+                                Type <strong id="deleteProjectNameHint"></strong> to confirm deletion. This action cannot be undone.
+                            </p>
+                            <input type="text" class="input-field danger-zone-input" id="deleteConfirmInput" placeholder="Enter project name" autocomplete="off">
+                            <button type="button" class="btn btn-outline btn-danger btn-full" id="editDeleteBtn" disabled>Delete Project</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Request Detail Modal: Profile preview + Chat -->
+        <div id="requestDetailModal" class="modal-overlay" style="display: none;">
+            <div class="modal-content request-detail-modal-content">
+                <div class="request-detail-header modal-title-row">
+                    <span class="card-title">Join Request</span>
+                    <button class="modal-close modal-close-inline" onclick="closeRequestDetail()">✕</button>
+                </div>
+                <div class="request-detail-layout">
+                    <!-- Left: Applicant profile -->
+                    <div class="request-profile-panel">
+                        <div class="request-profile-avatar" id="rdAvatar"></div>
+                        <div class="request-profile-username" id="rdUsername"></div>
+                        <div class="request-profile-meta" id="rdMeta"></div>
+                        <div class="request-profile-github" id="rdGithub"></div>
+                        <div class="request-profile-stars" id="rdStars"></div>
+                        <div class="request-profile-projects" id="rdProjects"></div>
+                    </div>
+                    <!-- Right: Chat + actions -->
+                    <div class="request-chat-panel">
+                        <div class="request-chat-messages" id="rdMessages"></div>
+                        <div class="request-chat-input-row">
+                            <input type="text" id="rdMessageInput" class="input-field" placeholder="Type a message..." maxlength="1000" onkeydown="if(event.key==='Enter')sendRequestMessage()">
+                            <button class="btn btn-primary btn-sm" onclick="sendRequestMessage()">Send</button>
+                        </div>
+                        <div class="request-chat-actions">
+                            <button class="btn btn-primary" id="rdAcceptBtn" onclick="handleRequestFromModal('accept')">Accept</button>
+                            <button class="btn btn-outline btn-danger" id="rdRejectBtn" onclick="handleRequestFromModal('reject')">Reject</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Start Kick Vote Modal -->
+        <div id="kickVoteModal" class="modal-overlay" style="display: none;">
+            <div class="modal-content kick-modal-content">
+                <button class="modal-close" onclick="closeKickVoteModal()">✕</button>
+                <h2 class="modal-title">Start Kick Vote</h2>
+                <p class="text-muted kick-modal-desc">Select a member to start a democratic kick vote. Requires 70% approval within 72 hours.</p>
+                <select id="kickTargetSelect" class="input-field kick-modal-select">
+                    <option value="">Select member...</option>
+                </select>
+                <button class="btn btn-primary btn-block" onclick="submitKickVote()">Start Vote</button>
+            </div>
+        </div>
     </main>
 
     <script src="../javascripts/navbar.js"></script>

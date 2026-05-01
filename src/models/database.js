@@ -123,6 +123,61 @@ async function initDatabase() {
     ALTER TABLE join_requests ADD COLUMN IF NOT EXISTS github_id BIGINT
   `);
 
+  // Temporary chat messages for join requests (deleted on accept/reject)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS join_request_messages (
+      id TEXT PRIMARY KEY,
+      request_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      encrypted_content TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      FOREIGN KEY (request_id) REFERENCES join_requests(id) ON DELETE CASCADE,
+      FOREIGN KEY (sender_id) REFERENCES users(id)
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_jrm_request ON join_request_messages(request_id, created_at)
+  `);
+
+  // Kick votes table — democratic kick system
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS kick_votes (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      target_user_id TEXT NOT NULL,
+      initiated_by TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      threshold_percent INTEGER NOT NULL DEFAULT 70,
+      expires_at TIMESTAMPTZ NOT NULL,
+      resolved_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      FOREIGN KEY (project_id) REFERENCES projects(id),
+      FOREIGN KEY (target_user_id) REFERENCES users(id),
+      FOREIGN KEY (initiated_by) REFERENCES users(id)
+    )
+  `);
+
+  // Partial unique index: only one open vote per (project, target)
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS kick_votes_open_unique
+    ON kick_votes (project_id, target_user_id)
+    WHERE status = 'open'
+  `);
+
+  // Kick vote ballots table — one ballot per voter per vote
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS kick_vote_ballots (
+      id TEXT PRIMARY KEY,
+      vote_id TEXT NOT NULL,
+      voter_user_id TEXT NOT NULL,
+      ballot TEXT NOT NULL,
+      cast_at TIMESTAMPTZ DEFAULT NOW(),
+      FOREIGN KEY (vote_id) REFERENCES kick_votes(id),
+      FOREIGN KEY (voter_user_id) REFERENCES users(id),
+      UNIQUE(vote_id, voter_user_id)
+    )
+  `);
+
   console.log('Database initialized');
 }
 
@@ -151,6 +206,54 @@ const userDb = {
   async findById(id) {
     const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
     return rows[0] || null;
+  },
+
+  // Public profile: basic info + active project history (for join request preview)
+  async getPublicProfile(userId, viewerUserId) {
+    const { rows: userRows } = await pool.query(
+      'SELECT id, username, created_at, github_username, github_id FROM users WHERE id = $1',
+      [userId]
+    );
+    if (!userRows[0]) return null;
+    const user = userRows[0];
+
+    // Get all projects user is/was an active member of
+    const { rows: projectRows } = await pool.query(
+      `SELECT p.id, p.name, p.project_type, p.github_repo, pm.role, pm.membership_status, pm.joined_at
+       FROM project_members pm
+       JOIN projects p ON pm.project_id = p.id
+       WHERE pm.user_id = $1 AND p.project_status != 'deleted'
+       ORDER BY pm.joined_at DESC`,
+      [userId]
+    );
+
+    // Get viewer's project memberships to check repo visibility
+    const { rows: viewerProjects } = viewerUserId
+      ? await pool.query(
+          `SELECT project_id FROM project_members WHERE user_id = $1 AND membership_status = 'active'`,
+          [viewerUserId]
+        )
+      : { rows: [] };
+    const viewerProjectIds = new Set(viewerProjects.map(r => r.project_id));
+
+    const projects = projectRows.map(p => ({
+      id: p.id,
+      name: p.name,
+      role: p.role,
+      membership_status: p.membership_status,
+      project_type: p.project_type,
+      joined_at: p.joined_at,
+      // Only show repo if viewer is also a member of that project
+      github_repo: viewerProjectIds.has(p.id) ? (p.github_repo || null) : (p.github_repo ? { private: true } : null)
+    }));
+
+    return {
+      id: user.id,
+      username: user.username,
+      created_at: user.created_at,
+      github_username: user.github_id ? user.github_username : null,
+      projects
+    };
   }
 };
 
@@ -363,6 +466,9 @@ const projectDb = {
           AND p.id NOT IN (
             SELECT project_id FROM project_members WHERE user_id = $1 AND membership_status = 'active'
           )
+          AND p.id NOT IN (
+            SELECT project_id FROM join_requests WHERE user_id = $1 AND status = 'pending'
+          )
         ORDER BY p.created_at DESC`,
         [userId]
       );
@@ -504,7 +610,7 @@ const memberDb = {
   // Get all members of a project (active members only)
   async getProjectMembers(projectId) {
     const { rows } = await pool.query(
-      `SELECT pm.*, u.username, u.email
+      `SELECT pm.*, u.username, u.email, u.github_username
       FROM project_members pm
       JOIN users u ON pm.user_id = u.id
       WHERE pm.project_id = $1 AND pm.membership_status = 'active'
@@ -558,6 +664,42 @@ const memberDb = {
     }
   },
 
+  // Check if user has moderator role on the project (active only)
+  async isModerator(projectId, userId) {
+    if (!userId) return false;
+    const { rows } = await pool.query(
+      `SELECT id FROM project_members WHERE project_id = $1 AND user_id = $2 AND role = 'moderator' AND membership_status = 'active'`,
+      [projectId, userId]
+    );
+    return rows.length > 0;
+  },
+
+  // Check if user has management role (creator or moderator)
+  async hasManagementRole(projectId, userId) {
+    if (!userId) return false;
+    const { rows } = await pool.query(
+      `SELECT pm.role, p.creator_id FROM project_members pm
+       JOIN projects p ON pm.project_id = p.id
+       WHERE pm.project_id = $1 AND pm.user_id = $2 AND pm.membership_status = 'active'`,
+      [projectId, userId]
+    );
+    if (rows.length === 0) return false;
+    const row = rows[0];
+    return row.creator_id === userId || row.role === 'moderator';
+  },
+
+  // Promote/demote member role (only between 'member' and 'moderator')
+  async setRole(projectId, userId, newRole) {
+    if (newRole !== 'member' && newRole !== 'moderator') return false;
+    // Cannot change creator role via this method
+    const { rowCount } = await pool.query(
+      `UPDATE project_members SET role = $1
+       WHERE project_id = $2 AND user_id = $3 AND membership_status = 'active' AND role != 'creator'`,
+      [newRole, projectId, userId]
+    );
+    return rowCount > 0;
+  },
+
   // Remove member from project (soft delete — self-leave)
   async removeMember(projectId, userId) {
     const client = await pool.connect();
@@ -584,6 +726,51 @@ const memberDb = {
     } finally {
       client.release();
     }
+  },
+
+  // Health: active members with no GitHub invite sent (software projects)
+  async getInviteNotSent(projectId) {
+    const { rows } = await pool.query(
+      `SELECT pm.user_id, pm.github_id, u.username
+       FROM project_members pm
+       JOIN users u ON u.id = pm.user_id
+       WHERE pm.project_id = $1
+         AND pm.membership_status = 'active'
+         AND pm.github_invited = 0
+         AND pm.role != 'creator'`,
+      [projectId]
+    );
+    return rows;
+  },
+
+  // Health: active members with invite pending > 7 days
+  async getInviteStuck(projectId) {
+    const { rows } = await pool.query(
+      `SELECT pm.user_id, pm.github_id, u.username, pm.github_invited_at
+       FROM project_members pm
+       JOIN users u ON u.id = pm.user_id
+       WHERE pm.project_id = $1
+         AND pm.membership_status = 'active'
+         AND pm.github_invited = 1
+         AND pm.github_invited_at < NOW() - INTERVAL '7 days'`,
+      [projectId]
+    );
+    return rows;
+  },
+
+  // Health: active members who accepted invite (github_invited=2) — used for collaborator check
+  async getAcceptedMembers(projectId) {
+    const { rows } = await pool.query(
+      `SELECT pm.user_id, pm.github_id, u.username
+       FROM project_members pm
+       JOIN users u ON u.id = pm.user_id
+       WHERE pm.project_id = $1
+         AND pm.membership_status = 'active'
+         AND pm.github_invited = 2
+         AND pm.role != 'creator'`,
+      [projectId]
+    );
+    return rows;
   }
 };
 
@@ -639,7 +826,9 @@ const joinRequestDb = {
   // Get all pending requests for a project
   async getPendingRequests(projectId) {
     const { rows } = await pool.query(
-      `SELECT jr.*, u.username, u.email
+      `SELECT jr.*, u.username, u.email, u.github_username,
+              (SELECT m.sender_id FROM join_request_messages m WHERE m.request_id = jr.id ORDER BY m.created_at DESC LIMIT 1) as last_message_sender_id,
+              (SELECT COUNT(*) FROM join_request_messages m WHERE m.request_id = jr.id AND m.sender_id != jr.user_id) as management_message_count
       FROM join_requests jr
       JOIN users u ON jr.user_id = u.id
       WHERE jr.project_id = $1 AND jr.status = 'pending'
@@ -671,6 +860,197 @@ const joinRequestDb = {
       [requestId]
     );
     return rowCount > 0;
+  },
+
+  // Get all pending requests by user (applicant side)
+  async cancelRequest(requestId, userId) {
+    const { rowCount } = await pool.query(
+      `DELETE FROM join_requests WHERE id = $1 AND user_id = $2 AND status = 'pending'`,
+      [requestId, userId]
+    );
+    return rowCount > 0;
+  },
+
+  async getByUserId(userId) {
+    const { rows } = await pool.query(
+      `SELECT jr.id, jr.project_id, jr.status, jr.created_at, jr.message,
+              p.name as project_name, p.description, p.tags, p.github_repo, p.project_type,
+              (SELECT m.created_at FROM join_request_messages m WHERE m.request_id = jr.id ORDER BY m.created_at DESC LIMIT 1) as last_message_at,
+              (SELECT m.sender_id FROM join_request_messages m WHERE m.request_id = jr.id ORDER BY m.created_at DESC LIMIT 1) as last_message_sender_id
+       FROM join_requests jr
+       JOIN projects p ON p.id = jr.project_id
+       WHERE jr.user_id = $1 AND jr.status = 'pending' AND p.project_status = 'active'
+       ORDER BY jr.created_at DESC`,
+      [userId]
+    );
+    return rows;
+  }
+};
+
+// Temporary chat messages for join requests
+const joinRequestMessageDb = {
+  async create(requestId, senderId, encryptedContent) {
+    const id = require('crypto').randomUUID();
+    await pool.query(
+      `INSERT INTO join_request_messages (id, request_id, sender_id, encrypted_content) VALUES ($1, $2, $3, $4)`,
+      [id, requestId, senderId, encryptedContent]
+    );
+    return id;
+  },
+
+  async getByRequestId(requestId) {
+    const { rows } = await pool.query(
+      `SELECT m.id, m.request_id, m.sender_id, m.encrypted_content, m.created_at,
+              u.username as sender_username,
+              pm.role as sender_role
+       FROM join_request_messages m
+       JOIN users u ON m.sender_id = u.id
+       LEFT JOIN join_requests jr ON jr.id = m.request_id
+       LEFT JOIN project_members pm ON pm.project_id = jr.project_id
+                                   AND pm.user_id = m.sender_id
+                                   AND pm.membership_status = 'active'
+       WHERE m.request_id = $1
+       ORDER BY m.created_at ASC`,
+      [requestId]
+    );
+    return rows;
+  },
+
+  async deleteByRequestId(requestId) {
+    await pool.query('DELETE FROM join_request_messages WHERE request_id = $1', [requestId]);
+  }
+};
+
+// Kick voting database operations
+const kickVoteDb = {
+  // Create a new kick vote (72h expiry by default)
+  async create(projectId, targetUserId, initiatedBy) {
+    const id = require('crypto').randomUUID();
+    const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+    await pool.query(
+      `INSERT INTO kick_votes (id, project_id, target_user_id, initiated_by, status, expires_at)
+       VALUES ($1, $2, $3, $4, 'open', $5)`,
+      [id, projectId, targetUserId, initiatedBy, expiresAt]
+    );
+    return { id, projectId, targetUserId, initiatedBy, status: 'open', expiresAt };
+  },
+
+  // Get the open vote for a specific target (null if none)
+  async getOpenVote(projectId, targetUserId) {
+    const { rows } = await pool.query(
+      `SELECT kv.*, u.username as target_username, ui.username as initiator_username
+       FROM kick_votes kv
+       JOIN users u ON kv.target_user_id = u.id
+       JOIN users ui ON kv.initiated_by = ui.id
+       WHERE kv.project_id = $1 AND kv.target_user_id = $2 AND kv.status = 'open'`,
+      [projectId, targetUserId]
+    );
+    return rows[0] || null;
+  },
+
+  // Get all votes for a project (open + closed), with ballot counts
+  async getVotesForProject(projectId) {
+    const { rows } = await pool.query(
+      `SELECT kv.*,
+         u.username as target_username,
+         ui.username as initiator_username,
+         COUNT(CASE WHEN kvb.ballot = 'yes' THEN 1 END) as yes_count,
+         COUNT(CASE WHEN kvb.ballot = 'no' THEN 1 END) as no_count,
+         COUNT(kvb.id) as total_voted
+       FROM kick_votes kv
+       JOIN users u ON kv.target_user_id = u.id
+       JOIN users ui ON kv.initiated_by = ui.id
+       LEFT JOIN kick_vote_ballots kvb ON kv.id = kvb.vote_id
+       WHERE kv.project_id = $1
+       GROUP BY kv.id, u.username, ui.username
+       ORDER BY kv.created_at DESC`,
+      [projectId]
+    );
+    return rows;
+  },
+
+  // Get a single vote by ID with ballot counts
+  async findById(voteId) {
+    const { rows } = await pool.query(
+      `SELECT kv.*,
+         u.username as target_username,
+         ui.username as initiator_username,
+         COUNT(CASE WHEN kvb.ballot = 'yes' THEN 1 END) as yes_count,
+         COUNT(CASE WHEN kvb.ballot = 'no' THEN 1 END) as no_count,
+         COUNT(kvb.id) as total_voted
+       FROM kick_votes kv
+       JOIN users u ON kv.target_user_id = u.id
+       JOIN users ui ON kv.initiated_by = ui.id
+       LEFT JOIN kick_vote_ballots kvb ON kv.id = kvb.vote_id
+       WHERE kv.id = $1
+       GROUP BY kv.id, u.username, ui.username`,
+      [voteId]
+    );
+    return rows[0] || null;
+  },
+
+  // Cast or update a ballot (upsert)
+  async castBallot(voteId, voterUserId, ballot) {
+    const id = require('crypto').randomUUID();
+    await pool.query(
+      `INSERT INTO kick_vote_ballots (id, vote_id, voter_user_id, ballot)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (vote_id, voter_user_id) DO UPDATE SET ballot = $4, cast_at = NOW()`,
+      [id, voteId, voterUserId, ballot]
+    );
+  },
+
+  // Get voter's ballot for a vote
+  async getBallot(voteId, voterUserId) {
+    const { rows } = await pool.query(
+      `SELECT ballot FROM kick_vote_ballots WHERE vote_id = $1 AND voter_user_id = $2`,
+      [voteId, voterUserId]
+    );
+    return rows[0] ? rows[0].ballot : null;
+  },
+
+  // Resolve a vote (passed/failed/cancelled)
+  async resolve(voteId, finalStatus) {
+    await pool.query(
+      `UPDATE kick_votes SET status = $1, resolved_at = NOW() WHERE id = $2`,
+      [finalStatus, voteId]
+    );
+  },
+
+  // Get open votes for all projects where user is an active member (for bell notifications)
+  async getPendingForUser(userId) {
+    const { rows } = await pool.query(
+      `SELECT kv.*, p.name as project_name,
+         u.username as target_username,
+         ui.username as initiator_username
+       FROM kick_votes kv
+       JOIN projects p ON kv.project_id = p.id
+       JOIN users u ON kv.target_user_id = u.id
+       JOIN users ui ON kv.initiated_by = ui.id
+       JOIN project_members pm ON kv.project_id = pm.project_id AND pm.user_id = $1
+       LEFT JOIN kick_vote_ballots kvb ON kv.id = kvb.vote_id AND kvb.voter_user_id = $1
+       WHERE kv.status = 'open'
+         AND kv.target_user_id != $1
+         AND pm.membership_status = 'active'
+         AND kvb.id IS NULL
+       ORDER BY kv.created_at DESC`,
+      [userId]
+    );
+    return rows;
+  },
+
+  // Health: open kick votes that have passed their expiry (lazy resolve didn't run)
+  async getExpiredOpen(projectId) {
+    const { rows } = await pool.query(
+      `SELECT kv.id, kv.expires_at, u.username as target_username
+       FROM kick_votes kv
+       JOIN users u ON u.id = kv.target_user_id
+       WHERE kv.project_id = $1
+         AND kv.status = 'open'
+         AND kv.expires_at < NOW()`,
+      [projectId]
+    );
+    return rows;
   }
 };
 
@@ -736,5 +1116,7 @@ module.exports = {
   projectDb,
   memberDb,
   joinRequestDb,
-  githubDb
+  joinRequestMessageDb,
+  githubDb,
+  kickVoteDb
 };

@@ -34,7 +34,7 @@
                             <span class="notif-badge" id="notifBadge">0</span>
                         </button>
                         <div class="notif-panel" id="notifPanel">
-                            <div class="notif-panel-header">Join Requests</div>
+                            <div class="notif-panel-header">Notifications</div>
                             <div class="notif-panel-body" id="notifPanelBody"></div>
                         </div>
                     </div>
@@ -197,6 +197,7 @@
             <div class="project-tabs">
                 <button class="tab-btn active" data-tab="active" id="activeTab">Active</button>
                 <button class="tab-btn" data-tab="past" id="pastTab">Past</button>
+                <button class="tab-btn" data-tab="pending" id="pendingTab">Pending</button>
             </div>
 
             <!-- Tab Content -->
@@ -212,12 +213,56 @@
                 </div>
             </div>
 
-            <!-- Single Pagination (shared by both tabs) -->
+            <div class="tab-content" id="pendingContent">
+                <div id="pendingRequestsContainer">
+                    <!-- Dynamically populated by JS -->
+                </div>
+            </div>
+
+            <!-- Single Pagination (shared by active/past tabs) -->
             <div class="pagination" id="projectPagination">
                 <!-- Pagination buttons -->
             </div>
         </section>
     </main>
+
+    <!-- APPLICANT CHAT MODAL -->
+    <div id="applicantChatModal" class="modal-overlay" style="display:none;">
+        <div class="modal-content request-detail-modal-content">
+            <div class="request-detail-header modal-title-row">
+                <span class="card-title">Your Application</span>
+                <button class="modal-close modal-close-inline" onclick="closeApplicantChat()">✕</button>
+            </div>
+            <div class="request-detail-layout">
+                <!-- Left: Project info (mirrors admin-side profile panel layout) -->
+                <div class="request-profile-panel">
+                    <div class="request-profile-avatar" id="acProjectAvatar"></div>
+                    <div class="request-profile-username" id="acProjectName"></div>
+                    <div class="request-profile-meta" id="acAppliedDate"></div>
+                    <div class="request-profile-github" id="acProjectRepo"></div>
+                    <div class="profile-tags-row" id="acProjectTags"></div>
+                    <div class="profile-section">
+                        <h4>About</h4>
+                        <p class="profile-section-text" id="acProjectDesc"></p>
+                    </div>
+                    <div class="profile-section" id="acApplicationMsgSection" style="display:none;">
+                        <h4>Your Message</h4>
+                        <p class="profile-section-text profile-quote" id="acApplicationMsg"></p>
+                    </div>
+                </div>
+                <!-- Right: Chat -->
+                <div class="request-chat-panel">
+                    <div class="request-chat-messages" id="acMessages"></div>
+                    <div class="request-chat-input-row">
+                        <input type="text" id="acMessageInput" class="input-field"
+                               placeholder="Type a message..." maxlength="1000"
+                               onkeydown="if(event.key==='Enter')sendApplicantMessage()">
+                        <button class="btn btn-primary btn-sm" onclick="sendApplicantMessage()">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- EDIT PROJECT MODAL -->
     <div class="modal-overlay modal-overlay-hidden" id="editModal">

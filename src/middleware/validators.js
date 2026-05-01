@@ -218,6 +218,62 @@ const paramMemberIdValidation = [
   handleValidationErrors
 ];
 
+// Vote ID parameter validation (UUID)
+const paramVoteIdValidation = [
+  param('voteId')
+    .isUUID()
+    .withMessage('Invalid vote ID format'),
+
+  handleValidationErrors
+];
+
+// Promote/demote moderator validation
+const moderatorValidation = [
+  body('userId')
+    .isUUID()
+    .withMessage('Invalid user ID format'),
+
+  handleValidationErrors
+];
+
+// Start kick vote validation
+const kickVoteValidation = [
+  body('targetUserId')
+    .isUUID()
+    .withMessage('Invalid target user ID format'),
+
+  handleValidationErrors
+];
+
+// Cast ballot validation
+const ballotValidation = [
+  body('ballot')
+    .isIn(['yes', 'no'])
+    .withMessage('Ballot must be "yes" or "no"'),
+
+  handleValidationErrors
+];
+
+// Chat message content validation
+const messageContentValidation = [
+  body('content')
+    .trim()
+    .isLength({ min: 1, max: 1000 })
+    .withMessage('Message must be between 1 and 1000 characters')
+    .escape(),
+
+  handleValidationErrors
+];
+
+// UUID param for user ID
+const paramUserIdValidation = [
+  param('userId')
+    .isUUID()
+    .withMessage('Invalid user ID format'),
+
+  handleValidationErrors
+];
+
 module.exports = {
   registerValidation,
   loginValidation,
@@ -227,5 +283,11 @@ module.exports = {
   manageRequestValidation,
   paramIdValidation,
   paramRequestIdValidation,
-  paramMemberIdValidation
+  paramMemberIdValidation,
+  paramVoteIdValidation,
+  moderatorValidation,
+  kickVoteValidation,
+  ballotValidation,
+  messageContentValidation,
+  paramUserIdValidation
 };

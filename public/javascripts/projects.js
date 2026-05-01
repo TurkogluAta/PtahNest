@@ -161,22 +161,21 @@ function changePage(page) {
 // Switch tabs
 function switchTab(tab) {
     currentTab = tab;
-    currentPage = 1; // Reset to first page when switching tabs
+    currentPage = 1;
 
-    // Update tab buttons
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.remove('active');
-    });
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     document.getElementById(tab + 'Tab').classList.add('active');
 
-    // Update tab content visibility
-    document.querySelectorAll('.tab-content').forEach(content => {
-        content.classList.remove('active');
-    });
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
     document.getElementById(tab + 'Content').classList.add('active');
 
-    // Re-render projects
-    renderProjects();
+    if (tab === 'pending') {
+        // Hide pagination (pending has no pagination)
+        document.getElementById('projectPagination').innerHTML = '';
+        loadPendingRequests();
+    } else {
+        renderProjects();
+    }
 }
 
 // Render all projects with pagination (tab-based)
@@ -211,11 +210,7 @@ function renderProjects() {
         container.innerHTML = paginatedProjects.map(renderProjectCard).join('');
         renderPagination(filteredProjects.length);
     } else {
-        container.innerHTML = `
-            <div class="card">
-                <p class="text-muted">${emptyMessage}</p>
-            </div>
-        `;
+        container.innerHTML = `<p class="text-muted empty-state">${emptyMessage}</p>`;
         document.getElementById('projectPagination').innerHTML = '';
     }
 }
@@ -278,7 +273,7 @@ document.querySelectorAll('.type-btn').forEach(btn => {
             if (!githubLinked) {
                 hint.textContent = 'Software projects require a linked GitHub account.';
                 hint.style.display = 'block';
-                hint.style.color = 'var(--danger, #f85149)';
+                hint.classList.add('text-danger');
             }
         } else {
             repoGroup.style.display = 'none';
@@ -326,9 +321,9 @@ document.getElementById('createProjectForm').addEventListener('submit', async (e
         if (!response.ok) {
             const data = await response.json();
             if (data.githubRequired) {
-                if (confirm(data.message + '\n\nGo to profile to link GitHub?')) {
+                showConfirm(data.message + ' Go to profile to link GitHub?', () => {
                     window.location.href = '/pages/profile.html';
-                }
+                }, { confirmText: 'Go to Profile' });
                 return;
             }
             showToast(data.message || 'Failed to create project', 'error');
@@ -371,6 +366,214 @@ document.getElementById('createProjectForm').addEventListener('submit', async (e
 // Tab button event listeners
 document.getElementById('activeTab').addEventListener('click', () => switchTab('active'));
 document.getElementById('pastTab').addEventListener('click', () => switchTab('past'));
+document.getElementById('pendingTab').addEventListener('click', () => switchTab('pending'));
+
+// ========================================
+// APPLICANT CHAT (pending join requests)
+// ========================================
+let currentUserId = null;
+let acRequestId = null;
+let acProjectId = null;
+let acPollingInterval = null;
+let pendingRequestsCache = {}; // requestId → full request object
+
+// Fetch current user ID from session
+async function initCurrentUser() {
+    try {
+        const res = await fetch('/api/auth/me');
+        const data = await res.json();
+        if (data.success) currentUserId = data.user.id;
+    } catch (e) { /* silent */ }
+}
+
+// Format date helper (reuse pattern from project-detail.js)
+function formatDate(dateStr) {
+    return new Date(dateStr).toLocaleDateString('en-IE', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+// Load and render pending join requests
+let pendingRequestsLoaded = false;
+
+async function loadPendingRequests(force = false) {
+    if (pendingRequestsLoaded && !force) {
+        renderPendingRequests();
+        return;
+    }
+    try {
+        const res = await fetch('/api/projects/my-requests');
+        const data = await res.json();
+        if (!data.success) throw new Error();
+        pendingRequestsCache = {};
+        data.requests.filter(r => r.status === 'pending').forEach(r => { pendingRequestsCache[r.id] = r; });
+        pendingRequestsLoaded = true;
+        renderPendingRequests();
+    } catch (e) {
+        document.getElementById('pendingRequestsContainer').innerHTML = '<div class="card"><p class="text-muted">Failed to load requests.</p></div>';
+    }
+}
+
+function renderPendingRequests() {
+    const container = document.getElementById('pendingRequestsContainer');
+    const requests = Object.values(pendingRequestsCache);
+    if (requests.length === 0) {
+        container.innerHTML = '<p class="text-muted empty-state">No pending requests.</p>';
+        return;
+    }
+    container.innerHTML = requests.map(r => `
+        <div class="card card-sm card-bottom-gap">
+            <div class="flex-between-center">
+                <div class="pending-card-clickable" onclick="openApplicantChat('${r.id}')">
+                    <div class="member-name">${escapeHtml(r.project_name)}</div>
+                    <div class="member-joined">Applied ${formatDate(r.created_at)}</div>
+                    ${r.message ? `<div class="text-muted pending-card-message">"${escapeHtml(r.message)}"</div>` : ''}
+                </div>
+                <div class="pending-card-actions">
+                    <button class="btn btn-sm btn-outline" onclick="openApplicantChat('${r.id}')">Chat →</button>
+                    <button class="btn btn-sm btn-outline btn-danger" onclick="cancelRequest('${r.id}', event)">Cancel</button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function cancelRequest(requestId, event) {
+    event.stopPropagation();
+    showConfirm('Cancel this join request?', async () => {
+        try {
+            const res = await fetch(`/api/projects/my-requests/${requestId}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.success) {
+                showToast('Request cancelled', 'info');
+                loadPendingRequests(true);
+            } else {
+                showToast(data.message || 'Failed to cancel', 'error');
+            }
+        } catch (e) {
+            showToast('Failed to cancel request', 'error');
+        }
+    }, { confirmText: 'Cancel Request', cancelText: 'Keep', danger: true });
+}
+
+// HTML escape (also escapes single quotes for safe use in onclick attributes)
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Open applicant chat modal — renders project details on the left panel
+function openApplicantChat(requestId) {
+    const r = pendingRequestsCache[requestId];
+    if (!r) return;
+    acRequestId = requestId;
+    acProjectId = r.project_id;
+
+    // Avatar initial + name + applied date (mirrors admin profile panel)
+    document.getElementById('acProjectAvatar').textContent = r.project_name.charAt(0).toUpperCase();
+    document.getElementById('acProjectName').textContent = r.project_name;
+    document.getElementById('acAppliedDate').textContent = `Applied ${formatDate(r.created_at)}`;
+
+    // GitHub repo link (same slot as admin-side rdGithub)
+    const repoEl = document.getElementById('acProjectRepo');
+    if (r.project_type === 'software' && r.github_repo) {
+        repoEl.innerHTML = `<a href="https://github.com/${escapeHtml(r.github_repo)}" target="_blank" rel="noopener">
+            <img src="../pictures/icons/github.svg" width="13" height="13"> ${escapeHtml(r.github_repo)}
+        </a>`;
+    } else {
+        repoEl.innerHTML = '';
+    }
+
+    // Tags
+    const tagsEl = document.getElementById('acProjectTags');
+    const tags = (() => { try { return JSON.parse(r.tags || '[]'); } catch { return []; } })();
+    tagsEl.innerHTML = tags.map(t => `<span class="profile-tag">${escapeHtml(t)}</span>`).join('');
+
+    // Description
+    document.getElementById('acProjectDesc').textContent = r.description || 'No description provided.';
+
+    // Applicant's original message (only show section if present)
+    const msgSection = document.getElementById('acApplicationMsgSection');
+    const msgEl = document.getElementById('acApplicationMsg');
+    if (r.message) {
+        msgEl.textContent = r.message;
+        msgSection.style.display = '';
+    } else {
+        msgSection.style.display = 'none';
+    }
+
+    document.getElementById('acMessages').innerHTML = '<p class="chat-empty">Loading...</p>';
+    document.getElementById('applicantChatModal').style.display = 'flex';
+    fetchApplicantMessages();
+    acPollingInterval = setInterval(fetchApplicantMessages, 2000);
+}
+
+// Close modal and stop polling
+function closeApplicantChat() {
+    document.getElementById('applicantChatModal').style.display = 'none';
+    clearInterval(acPollingInterval);
+    acPollingInterval = null;
+    acRequestId = null;
+    acProjectId = null;
+    document.getElementById('acMessageInput').value = '';
+}
+
+// Fetch and render messages
+async function fetchApplicantMessages() {
+    if (!acRequestId || !acProjectId) return;
+    try {
+        const res = await fetch(`/api/projects/${acProjectId}/requests/${acRequestId}/messages`);
+        const data = await res.json();
+        if (!data.success) return;
+        const container = document.getElementById('acMessages');
+        if (data.messages.length === 0) {
+            container.innerHTML = '<p class="chat-empty">No messages yet. Say hello!</p>';
+            return;
+        }
+        const wasAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 40;
+        container.innerHTML = data.messages.map(m => {
+            const isSelf = m.sender_id === currentUserId;
+            const roleLabel = m.sender_role === 'creator' ? 'Creator'
+                            : m.sender_role === 'moderator' ? 'Mod'
+                            : '';
+            const senderLine = roleLabel
+                ? `${escapeHtml(m.sender_username)} <span class="chat-sender-role">${roleLabel}</span>`
+                : escapeHtml(m.sender_username);
+            return `
+                <div class="chat-message ${isSelf ? 'chat-message-self' : 'chat-message-other'}">
+                    <div class="chat-message-sender">${senderLine}</div>
+                    <div>${escapeHtml(m.content)}</div>
+                    <div class="chat-message-time">${formatDate(m.created_at)}</div>
+                </div>`;
+        }).join('');
+        if (wasAtBottom) container.scrollTop = container.scrollHeight;
+    } catch (e) { /* silent */ }
+}
+
+// Send message as applicant
+async function sendApplicantMessage() {
+    const input = document.getElementById('acMessageInput');
+    const content = input.value.trim();
+    if (!content || !acRequestId || !acProjectId) return;
+    try {
+        const res = await fetch(`/api/projects/${acProjectId}/requests/${acRequestId}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+        const data = await res.json();
+        if (data.success) {
+            input.value = '';
+            fetchApplicantMessages();
+        } else {
+            showToast(data.message || 'Failed to send', 'error');
+        }
+    } catch (e) {
+        showToast('Failed to send message', 'error');
+    }
+}
+
+// Init current user on page load
+initCurrentUser();
 
 // ========================================
 // GITHUB REPO SLIDE BOX
@@ -465,7 +668,7 @@ async function loadGithubRepos() {
             const typeHint = document.getElementById('projectTypeHint');
             typeHint.textContent = 'Software projects require a linked GitHub account.';
             typeHint.style.display = 'block';
-            typeHint.style.color = 'var(--danger, #f85149)';
+            typeHint.classList.add('text-danger');
         }
 
         if (!statusData.linked) {
@@ -622,34 +825,30 @@ document.addEventListener('keydown', (e) => {
 });
 
 // Complete project from edit modal
-document.getElementById('editCompleteBtn').addEventListener('click', async () => {
+document.getElementById('editCompleteBtn').addEventListener('click', () => {
     const projectId = document.getElementById('editProjectId').value;
-    if (!confirm('Mark this project as completed? Members will remain but recruitment will close.')) return;
-
-    try {
-        const response = await fetch(`/api/projects/${projectId}/complete`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' }
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            closeEditModal();
-            // Update local state
-            const idx = projects.findIndex(p => p.id === projectId);
-            if (idx !== -1) {
-                projects[idx].status = 'completed';
-                projects[idx].recruitmentOpen = false;
+    showConfirm('Mark this project as completed? Members will remain but recruitment will close.', async () => {
+        try {
+            const response = await fetch(`/api/projects/${projectId}/complete`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await response.json();
+            if (response.ok) {
+                closeEditModal();
+                const idx = projects.findIndex(p => p.id === projectId);
+                if (idx !== -1) {
+                    projects[idx].status = 'completed';
+                    projects[idx].recruitmentOpen = false;
+                }
+                renderProjects();
+            } else {
+                showToast(data.message || 'Failed to complete project', 'error');
             }
-            renderProjects();
-        } else {
-            showToast(data.message || 'Failed to complete project', 'error');
+        } catch (error) {
+            showToast('Failed to complete project. Please try again.', 'error');
         }
-    } catch (error) {
-        console.error('Complete project error:', error);
-        showToast('Failed to complete project. Please try again.', 'error');
-    }
+    }, { confirmText: 'Complete Project' });
 });
 
 // Enable/disable delete button based on name confirmation input
