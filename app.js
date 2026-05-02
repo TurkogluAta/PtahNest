@@ -18,6 +18,7 @@ var { pool, initDatabase } = require('./src/models/database');
 var authRouter = require('./src/routes/authRoutes');
 var projectRouter = require('./src/routes/projectRoutes');
 var githubRouter = require('./src/routes/githubRoutes');
+var notificationRouter = require('./src/routes/notificationRoutes');
 
 var app = express();
 
@@ -109,6 +110,10 @@ app.use('/api/projects', projectRouter);
 
 // GitHub OAuth routes
 app.use('/api/github', githubRouter);
+
+// Notification routes
+app.use('/api/notifications', apiLimiter);
+app.use('/api/notifications', notificationRouter);
 
 // Redirect root to appropriate page based on auth status
 app.get('/', (req, res) => {

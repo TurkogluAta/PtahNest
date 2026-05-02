@@ -142,7 +142,7 @@ describe('PUT /api/projects/:id (Update)', () => {
         recruitmentOpen: true
       });
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
   });
 });
 

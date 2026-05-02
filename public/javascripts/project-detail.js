@@ -243,6 +243,9 @@ function initTabBar() {
     if (isManagement && project.status === 'active') {
         document.getElementById('tabBar').style.display = 'block';
         loadAdminPanel();
+        // Switch to tab specified in URL param (e.g. ?tab=admin from notification)
+        const tabParam = urlParams.get('tab');
+        if (tabParam === 'admin') switchDetailTab('admin');
     }
 }
 
@@ -291,9 +294,8 @@ async function loadAdminRequests() {
         const data = await res.json();
         const container = document.getElementById('adminRequestsContainer');
         // Red dot on Admin Panel tab if there are pending requests
-        const adminDot = document.getElementById('adminDot');
+
         const hasPending = data.success && data.requests.length > 0;
-        if (adminDot) adminDot.style.display = hasPending ? 'inline-block' : 'none';
         updateRequestsDot(hasPending ? data.requests.length : 0);
 
         if (!data.success || data.requests.length === 0) {
@@ -322,7 +324,7 @@ function renderRequestsPage() {
         const chatStatus = mgmtCount === 0
             ? '<span class="req-chat-status req-chat-new">New</span>'
             : lastFromApplicant
-                ? '<span class="req-chat-status req-chat-replied">Replied</span>'
+                ? '<span class="req-chat-status req-chat-new">New Reply</span>'
                 : '<span class="req-chat-status req-chat-waiting">Waiting</span>';
 
         // Mock applicant score — stable per request id (TODO: replace with real score)
@@ -379,6 +381,7 @@ async function handleRequest(requestId, action, username) {
             showToast(action === 'accept' ? `${username} added to project` : `Request from ${username} rejected`, 'success');
             loadAdminRequests();
             fetchMembers();
+            if (typeof fetchNotifRequests === 'function') fetchNotifRequests();
         } else {
             showToast(data.message || 'Failed to process request', 'error');
         }
@@ -577,8 +580,6 @@ async function loadKickVotes() {
         }
 
         // Red dot on Overview tab if there are open votes
-        const overviewDot = document.getElementById('overviewDot');
-        if (overviewDot) overviewDot.style.display = openVotes.length > 0 ? 'inline-block' : 'none';
     } catch (e) {
         const activeContainer = document.getElementById('activeKicksContainer');
         const pastContainer = document.getElementById('pastKicksContainer');
@@ -778,6 +779,7 @@ async function castBallot(voteId, ballot) {
         if (res.ok) {
             showToast(`Voted ${ballot}`, 'success');
             loadKickVotes();
+            if (typeof fetchNotifRequests === 'function') fetchNotifRequests();
             if (data.voteStatus === 'passed') {
                 showToast('Kick vote passed! Member has been removed.', 'info');
                 await fetchMembers();
@@ -800,6 +802,7 @@ async function cancelKickVote(voteId) {
         if (res.ok) {
             showToast('Kick vote cancelled', 'success');
             loadKickVotes();
+            if (typeof fetchNotifRequests === 'function') fetchNotifRequests();
         } else {
             showToast(data.message || 'Failed to cancel', 'error');
         }
@@ -844,17 +847,35 @@ function updateHealthDot(issues) {
 const HEALTH_PER_PAGE = 5;
 let healthIssues = [];
 let healthPage = 1;
+let healthReads = {}; // issueKey → { creator: bool, moderator: bool }
 
 async function loadProjectHealth() {
     const container = document.getElementById('healthContainer');
+
     try {
-        const res = await fetch(`/api/projects/${projectId}/health`);
-        const data = await res.json();
-        if (!data.success) {
+        // Fetch issues and read state in parallel
+        const [issuesRes, readsRes] = await Promise.all([
+            fetch(`/api/projects/${projectId}/health`),
+            fetch(`/api/projects/${projectId}/health-reads`)
+        ]);
+        const issuesData = await issuesRes.json();
+        const readsData = await readsRes.json();
+
+        if (!issuesData.success) {
             container.innerHTML = '<p class="text-muted">Could not load health data.</p>';
             return;
         }
-        healthIssues = data.issues;
+
+        // Build healthReads map: issueKey → { creator: bool, moderator: bool }
+        healthReads = {};
+        if (readsData.success) {
+            for (const r of readsData.reads) {
+                if (!healthReads[r.issue_key]) healthReads[r.issue_key] = {};
+                healthReads[r.issue_key][r.role] = true;
+            }
+        }
+
+        healthIssues = issuesData.issues;
         updateHealthDot(healthIssues);
         healthPage = 1;
         renderHealthPage();
@@ -863,34 +884,76 @@ async function loadProjectHealth() {
     }
 }
 
-// Health read-state storage (mock — localStorage-based until backend endpoint exists)
-function healthReadKey() {
-    return `healthRead_${projectId}`;
-}
-
-function loadHealthReadState() {
-    try {
-        return JSON.parse(localStorage.getItem(healthReadKey()) || '{}');
-    } catch { return {}; }
-}
-
-function saveHealthReadState(state) {
-    localStorage.setItem(healthReadKey(), JSON.stringify(state));
-}
-
 function issueKey(issue, idx) {
-    // Stable key per issue — use type + userId/voteId fallback to index
     return `${issue.type}_${issue.userId || issue.voteId || idx}`;
 }
 
-function toggleHealthRead(issueKeyStr, role) {
-    if (role !== 'creator' && role !== 'moderator') return;
-    if (currentUserRole !== role) return; // can only toggle own role
-    const state = loadHealthReadState();
-    state[issueKeyStr] = state[issueKeyStr] || {};
-    state[issueKeyStr][role] = !state[issueKeyStr][role];
-    saveHealthReadState(state);
+// Resolve is one-way — creator marks, cannot unmark
+async function resolveHealthIssue(issueKeyStr) {
+    if (currentUserRole !== 'creator') return;
+    if (healthReads[issueKeyStr] && healthReads[issueKeyStr].creator) return;
+
+    if (!healthReads[issueKeyStr]) healthReads[issueKeyStr] = {};
+    healthReads[issueKeyStr].creator = true;
     renderHealthPage();
+
+    try {
+        const res = await fetch(`/api/projects/${projectId}/health-reads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ issueKey: issueKeyStr, role: 'creator', read: true })
+        });
+        if (!res.ok) throw new Error();
+    } catch {
+        healthReads[issueKeyStr].creator = false;
+        renderHealthPage();
+        showToast('Failed to resolve issue', 'error');
+    }
+}
+
+// Mod acknowledge — still toggleable
+async function toggleModRead(issueKeyStr) {
+    if (currentUserRole !== 'moderator') return;
+
+    const prev = !!(healthReads[issueKeyStr] && healthReads[issueKeyStr].moderator);
+    if (!healthReads[issueKeyStr]) healthReads[issueKeyStr] = {};
+    healthReads[issueKeyStr].moderator = !prev;
+    renderHealthPage();
+
+    try {
+        const res = await fetch(`/api/projects/${projectId}/health-reads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ issueKey: issueKeyStr, role: 'moderator', read: !prev })
+        });
+        if (!res.ok) throw new Error();
+    } catch {
+        healthReads[issueKeyStr].moderator = prev;
+        renderHealthPage();
+        showToast('Failed to save read state', 'error');
+    }
+}
+
+// Creator dismisses issue entirely — removed from list
+async function dismissHealthIssue(issueKeyStr) {
+    if (currentUserRole !== 'creator') return;
+    showConfirm('Dismiss this issue? It will be removed from the health panel.', async () => {
+        const prevIssues = healthIssues;
+        healthIssues = healthIssues.filter((issue, idx) => issueKey(issue, idx) !== issueKeyStr);
+        renderHealthPage();
+        updateHealthDot(healthIssues);
+
+        try {
+            const res = await fetch(`/api/projects/${projectId}/health-reads/${encodeURIComponent(issueKeyStr)}`, {
+                method: 'DELETE'
+            });
+            if (!res.ok) throw new Error();
+        } catch {
+            healthIssues = prevIssues;
+            renderHealthPage();
+            showToast('Failed to dismiss issue', 'error');
+        }
+    }, { confirmText: 'Dismiss', danger: true });
 }
 
 function renderHealthPage() {
@@ -903,12 +966,11 @@ function renderHealthPage() {
     const totalPages = Math.ceil(total / HEALTH_PER_PAGE);
     const start = (healthPage - 1) * HEALTH_PER_PAGE;
     const pageItems = healthIssues.slice(start, start + HEALTH_PER_PAGE);
-    const readState = loadHealthReadState();
 
     const issuesHtml = pageItems.map((issue, i) => {
         const globalIdx = start + i;
         const key = issueKey(issue, globalIdx);
-        const reads = readState[key] || {};
+        const reads = healthReads[key] || {};
         return renderHealthIssue(issue, key, reads);
     }).join('');
 
@@ -958,32 +1020,33 @@ function renderHealthIssue(issue, key, reads) {
     const c = configs[issue.type];
     if (!c) return '';
 
-    const adminRead = !!(reads && reads.creator);
-    const modRead = !!(reads && reads.moderator);
-    // Only admin (creator) tick dims the issue. Mod tick is just a visibility marker.
-    const isResolved = adminRead;
+    const isResolved = !!(reads && reads.creator);
+    const modAcked = !!(reads && reads.moderator);
+    const isCreator = currentUserRole === 'creator';
+    const isMod = currentUserRole === 'moderator';
 
-    const adminCanToggle = currentUserRole === 'creator';
-    const modCanToggle = currentUserRole === 'moderator';
+    // Build action buttons row
+    let actionsHtml = '';
+    if (isCreator) {
+        actionsHtml += isResolved
+            ? `<span class="health-resolved-badge">✓ Reviewed</span>`
+            : `<button class="btn btn-sm btn-outline" onclick="resolveHealthIssue('${key}')">Mark Reviewed</button>`;
+        actionsHtml += `<button class="btn btn-sm btn-outline btn-danger health-delete-btn" onclick="dismissHealthIssue('${key}')">✕</button>`;
+    } else if (isMod) {
+        if (isResolved) actionsHtml += `<span class="health-resolved-badge">✓ Resolved</span>`;
+        actionsHtml += `<button class="btn btn-sm btn-outline${modAcked ? ' health-mod-acked' : ''}" onclick="toggleModRead('${key}')">${modAcked ? '✓ Acked' : 'Acknowledge'}</button>`;
+    }
+
+    const modAckedFooter = isCreator && modAcked ? `<div class="health-mod-badge">· Mod ✓</div>` : '';
 
     return `
         <div class="health-issue health-issue-${c.severity}${isResolved ? ' health-issue-read' : ''}">
             <div class="health-issue-body">
                 <div class="health-issue-title">${c.title}</div>
                 <div class="health-issue-desc">${c.desc}</div>
+                ${modAckedFooter}
             </div>
-            <div class="health-issue-marks">
-                <label class="health-mark ${adminRead ? 'health-mark-on' : ''} ${adminCanToggle ? '' : 'health-mark-readonly'}"
-                       ${adminCanToggle ? `onclick="toggleHealthRead('${key}','creator')"` : ''}>
-                    <span class="health-mark-box">${adminRead ? '✓' : ''}</span>
-                    <span class="health-mark-label">Admin</span>
-                </label>
-                <label class="health-mark ${modRead ? 'health-mark-on' : ''} ${modCanToggle ? '' : 'health-mark-readonly'}"
-                       ${modCanToggle ? `onclick="toggleHealthRead('${key}','moderator')"` : ''}>
-                    <span class="health-mark-box">${modRead ? '✓' : ''}</span>
-                    <span class="health-mark-label">Mod</span>
-                </label>
-            </div>
+            <div class="health-issue-actions">${actionsHtml}</div>
         </div>`;
 }
 
@@ -1126,6 +1189,8 @@ async function sendRequestMessage() {
         if (data.success) {
             input.value = '';
             fetchAndRenderMessages();
+            loadAdminRequests();
+            if (typeof fetchNotifRequests === 'function') fetchNotifRequests();
         } else {
             showToast(data.message || 'Failed to send', 'error');
         }
@@ -1463,10 +1528,17 @@ async function fetchCommits(page = 1) {
 
     const section = document.getElementById('commitsSection');
     const container = document.getElementById('commitsContainer');
+    const pagination = document.getElementById('commitsPagination');
     section.style.display = 'block';
 
-    if (page === 1) {
+    // First load: show placeholder; subsequent pages: dim existing content
+    if (page === 1 && allCommits.length === 0) {
         container.innerHTML = '<div class="commits-loading">Loading commits...</div>';
+    } else {
+        container.style.opacity = '0.4';
+        container.style.pointerEvents = 'none';
+        pagination.style.opacity = '0.4';
+        pagination.style.pointerEvents = 'none';
     }
 
     commitLoading = true;
@@ -1474,6 +1546,11 @@ async function fetchCommits(page = 1) {
     try {
         const response = await fetch(`/api/github/commits/${projectId}?page=${page}`);
         const data = await response.json();
+
+        container.style.opacity = '';
+        container.style.pointerEvents = '';
+        pagination.style.opacity = '';
+        pagination.style.pointerEvents = '';
 
         if (!data.success) {
             // GitHub not linked — show connect prompt instead of generic error
@@ -1486,8 +1563,8 @@ async function fetchCommits(page = 1) {
             return;
         }
 
-        if (page === 1) allCommits = [];
-        allCommits = allCommits.concat(data.commits);
+        // Replace, don't accumulate — each page is independent
+        allCommits = data.commits;
 
         commitPage = data.page;
         commitHasNext = data.hasNextPage;
@@ -1495,6 +1572,10 @@ async function fetchCommits(page = 1) {
 
         renderCommits();
     } catch (error) {
+        container.style.opacity = '';
+        container.style.pointerEvents = '';
+        pagination.style.opacity = '';
+        pagination.style.pointerEvents = '';
         console.error('Fetch commits error:', error);
         container.innerHTML = '<div class="commits-empty">Failed to load commits.</div>';
         commitLoading = false;
@@ -1606,7 +1687,6 @@ function renderCommitRating(value) {
 
 // Load specific commit page (replaces current view)
 function loadCommitPage(page) {
-    allCommits = [];
     fetchCommits(page);
     // Scroll to commits section
     document.getElementById('commitsSection').scrollIntoView({ behavior: 'smooth' });

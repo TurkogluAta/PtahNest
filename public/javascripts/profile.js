@@ -1,24 +1,126 @@
+let currentUser = null;
+
 // Load and display current user's profile data
 async function loadUserProfile() {
     try {
-        const response = await fetch('/api/auth/me', {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-        });
-
+        const response = await fetch('/api/auth/me');
         const data = await response.json();
 
         if (response.ok && data.user) {
-            document.getElementById('userName').textContent = data.user.username;
-            document.getElementById('userEmail').textContent = data.user.email;
+            currentUser = data.user;
+            renderAccountInfo(data.user);
         } else {
-            document.getElementById('userName').textContent = 'Error loading username';
-            document.getElementById('userEmail').textContent = 'Error loading email';
+            showToast('Failed to load profile', 'error');
         }
     } catch (error) {
         console.error('Error loading user profile:', error);
-        document.getElementById('userName').textContent = 'Error loading username';
-        document.getElementById('userEmail').textContent = 'Error loading email';
+        showToast('Failed to load profile', 'error');
+    }
+}
+
+// Render the account info display section
+function renderAccountInfo(user) {
+    document.getElementById('displayUsername').textContent = user.username;
+    document.getElementById('displayEmail').textContent = user.email;
+
+    // Hero section
+    document.getElementById('profileAvatarLarge').textContent = user.username.charAt(0).toUpperCase();
+    document.getElementById('heroUsername').textContent = user.username;
+    if (user.created_at) {
+        const joined = new Date(user.created_at).toLocaleDateString('en-IE', { year: 'numeric', month: 'long', day: 'numeric' });
+        document.getElementById('heroMeta').textContent = `Member since ${joined}`;
+    }
+}
+
+// Open inline edit form
+function openEditInfo() {
+    document.getElementById('editUsername').value = currentUser ? currentUser.username : '';
+    document.getElementById('editEmail').value = currentUser ? currentUser.email : '';
+    document.getElementById('profileInfoDisplay').style.display = 'none';
+    document.getElementById('profileInfoEdit').style.display = 'block';
+    document.getElementById('editInfoBtn').style.display = 'none';
+}
+
+// Close inline edit form
+function closeEditInfo() {
+    document.getElementById('profileInfoDisplay').style.display = 'block';
+    document.getElementById('profileInfoEdit').style.display = 'none';
+    document.getElementById('editInfoBtn').style.display = '';
+}
+
+// Submit account info changes
+async function submitEditInfo() {
+    const username = document.getElementById('editUsername').value.trim();
+    const email = document.getElementById('editEmail').value.trim();
+
+    if (!username || !email) {
+        showToast('Username and email are required', 'error');
+        return;
+    }
+
+    // Skip API call if nothing changed
+    if (username === currentUser.username && email === currentUser.email) {
+        closeEditInfo();
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/auth/profile', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, email })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            currentUser = { ...currentUser, ...data.user };
+            renderAccountInfo(currentUser);
+            closeEditInfo();
+            showToast('Profile updated', 'success');
+        } else {
+            showToast(data.message || 'Failed to update profile', 'error');
+        }
+    } catch (error) {
+        console.error('Update profile error:', error);
+        showToast('Failed to update profile', 'error');
+    }
+}
+
+// Submit password change
+async function submitChangePassword() {
+    const currentPassword = document.getElementById('currentPassword').value;
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+        showToast('All password fields are required', 'error');
+        return;
+    }
+
+    if (newPassword !== confirmPassword) {
+        showToast('New passwords do not match', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/auth/profile', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ currentPassword, newPassword })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            document.getElementById('currentPassword').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('confirmPassword').value = '';
+            showToast('Password updated successfully', 'success');
+        } else {
+            showToast(data.message || 'Failed to update password', 'error');
+        }
+    } catch (error) {
+        console.error('Change password error:', error);
+        showToast('Failed to update password', 'error');
     }
 }
 
@@ -49,7 +151,6 @@ function checkGithubCallback() {
         messageEl.textContent = messages[reason] || 'An error occurred linking your GitHub account.';
     }
 
-    // Clean URL params without reload
     window.history.replaceState({}, '', window.location.pathname);
 }
 
@@ -78,34 +179,32 @@ async function loadGithubStatus() {
 
 // Unlink GitHub account
 async function unlinkGithub() {
-    // Warn member-only users that commit history will be unavailable after unlink
-    if (!confirm('Are you sure you want to unlink your GitHub account?\n\nIf you are a member of any software projects, you will lose access to commit history and GitHub features until you re-link.')) return;
+    showConfirm(
+        'Unlink your GitHub account? You will lose access to commit history and GitHub features in software projects until you re-link.',
+        async () => {
+            try {
+                const response = await fetch('/api/github/unlink', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
 
-    try {
-        const response = await fetch('/api/github/unlink', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-        });
-
-        const data = await response.json();
-        const messageEl = document.getElementById('githubMessage');
-        messageEl.style.display = 'block';
-
-        if (data.success) {
-            messageEl.className = 'github-message github-message-success';
-            messageEl.textContent = 'GitHub account unlinked.';
-            loadGithubStatus();
-        } else {
-            // Show error (e.g. blocked because user is a software project creator)
-            messageEl.className = 'github-message github-message-error';
-            messageEl.textContent = data.message || 'Failed to unlink GitHub account.';
-        }
-    } catch (error) {
-        console.error('Error unlinking GitHub:', error);
-    }
+                if (data.success) {
+                    showToast('GitHub account unlinked', 'success');
+                    loadGithubStatus();
+                } else {
+                    showToast(data.message || 'Failed to unlink GitHub account', 'error');
+                }
+            } catch (error) {
+                console.error('Error unlinking GitHub:', error);
+                showToast('Failed to unlink GitHub account', 'error');
+            }
+        },
+        { confirmText: 'Unlink', danger: true }
+    );
 }
 
-// Init — load data, then reveal content
+// Init
 (async function initProfile() {
     checkGithubCallback();
     await Promise.all([loadUserProfile(), loadGithubStatus()]);

@@ -27,7 +27,6 @@
                 </nav>
 
                 <div class="header-icons">
-                    <!-- NOTIFICATION BELL -->
                     <div class="notif-wrapper" id="notifWrapper">
                         <button class="notif-bell" id="notifBell">
                             <img src="../pictures/icons/bell.svg" width="20" height="20" alt="Notifications">
@@ -39,19 +38,16 @@
                         </div>
                     </div>
 
-                    <!-- USER AVATAR -->
                     <div class="user-wrapper">
                         <div class="user-avatar" id="userAvatar">
                             <img src="../pictures/icons/user.svg" width="18" height="18" />
                         </div>
-
                         <div class="user-dropdown" id="userDropdown">
                             <a class="dropdown-item" href="profile.html">Profile</a>
                             <a class="dropdown-item" href="#">Logout</a>
                         </div>
                     </div>
 
-                    <!-- HAMBURGER -->
                     <button class="hamburger-btn" id="hamburgerBtn">
                         <img src="../pictures/icons/hamburger.svg" width="24" height="24" />
                     </button>
@@ -60,7 +56,6 @@
             </div>
         </div>
 
-        <!-- Mobile Menu -->
         <div class="mobile-menu" id="mobileMenu">
             <a href="index.html" class="mobile-link">Dashboard</a>
             <a href="projects.html" class="mobile-link">Projects</a>
@@ -69,28 +64,103 @@
     </header>
 
     <main class="layout-dashboard main-content">
-        <section>
-            <h1 class="hero-title">Profile</h1>
-            <p class="text-muted">User information</p>
 
+        <!-- Profile hero -->
+        <div class="profile-hero">
+            <div class="profile-avatar-large" id="profileAvatarLarge">A</div>
+            <div class="profile-hero-info">
+                <div class="profile-hero-name" id="heroUsername">Loading...</div>
+                <div class="profile-hero-meta" id="heroMeta">Member since —</div>
+            </div>
+        </div>
+
+        <!-- Two-column grid -->
+        <div class="profile-grid">
+
+            <!-- Left: Account Info -->
             <div class="card profile-card">
-                <div class="card-title">Username</div>
-                <div id="userName" class="profile-data">Loading...</div>
+                <div class="profile-card-header">
+                    <div class="card-title">Account Info</div>
+                    <button class="btn btn-sm btn-outline" id="editInfoBtn" onclick="openEditInfo()">Edit</button>
+                </div>
+
+                <div id="profileInfoDisplay">
+                    <div class="profile-info-row">
+                        <span class="profile-info-label">Username</span>
+                        <span class="profile-info-value" id="displayUsername">—</span>
+                    </div>
+                    <div class="profile-info-row">
+                        <span class="profile-info-label">Email</span>
+                        <span class="profile-info-value" id="displayEmail">—</span>
+                    </div>
+                </div>
+
+                <div id="profileInfoEdit" class="profile-edit-form">
+                    <div class="input-group">
+                        <label class="input-label" for="editUsername">Username</label>
+                        <div class="input-wrapper">
+                            <input type="text" id="editUsername" class="input-field" placeholder="Enter username" maxlength="30">
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label" for="editEmail">Email</label>
+                        <div class="input-wrapper">
+                            <input type="email" id="editEmail" class="input-field" placeholder="Enter email" maxlength="254">
+                        </div>
+                    </div>
+                    <div class="profile-edit-actions">
+                        <button class="btn btn-sm btn-outline" onclick="closeEditInfo()">Cancel</button>
+                        <button class="btn btn-sm btn-primary" onclick="submitEditInfo()">Save</button>
+                    </div>
+                </div>
             </div>
 
+            <!-- Right: Change Password -->
             <div class="card profile-card">
-                <div class="card-title">Email</div>
-                <div id="userEmail" class="profile-data">Loading...</div>
+                <div class="profile-card-header">
+                    <div class="card-title">Change Password</div>
+                </div>
+                <div class="input-group">
+                    <label class="input-label" for="currentPassword">Current Password</label>
+                    <div class="input-wrapper">
+                        <input type="password" id="currentPassword" class="input-field" placeholder="Enter current password">
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label class="input-label" for="newPassword">New Password</label>
+                    <div class="input-wrapper">
+                        <input type="password" id="newPassword" class="input-field" placeholder="Min 8 chars, uppercase, number, symbol">
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label class="input-label" for="confirmPassword">Confirm New Password</label>
+                    <div class="input-wrapper">
+                        <input type="password" id="confirmPassword" class="input-field" placeholder="Repeat new password">
+                    </div>
+                </div>
+                <div class="profile-edit-actions">
+                    <button class="btn btn-sm btn-primary" onclick="submitChangePassword()">Update Password</button>
+                </div>
             </div>
 
-            <!-- GitHub Integration -->
-            <div class="card profile-card">
-                <div class="card-title">GitHub</div>
-                <div id="githubMessage" class="github-message" style="display:none;"></div>
-                <div id="githubStatus" class="profile-data">Loading...</div>
-                <div id="githubActions" class="spaced-top"></div>
+        </div>
+
+        <!-- GitHub full-width -->
+        <div class="card profile-card profile-card-github">
+            <div class="profile-card-header">
+                <div class="profile-github-left">
+                    <img src="../pictures/icons/github.svg" width="20" height="20" style="opacity:0.8;">
+                    <div class="card-title">GitHub</div>
+                </div>
+                <div id="githubActions"></div>
             </div>
-        </section>
+            <div id="githubMessage" class="github-message" style="display:none;"></div>
+            <div class="profile-info-row" style="border-bottom: none; padding: 0;">
+                <span class="profile-info-label">Account</span>
+                <span class="profile-info-value" id="githubStatus">Loading...</span>
+            </div>
+        </div>
+
     </main>
 
     <script src="../javascripts/navbar.js"></script>

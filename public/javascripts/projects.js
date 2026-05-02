@@ -10,8 +10,11 @@ let githubLinked = false;
 
 // Pagination state
 const PROJECTS_PER_PAGE = 4;
+const PENDING_PER_PAGE = 4;
 let currentPage = 1;
+let pendingPage = 1;
 let currentTab = 'active'; // 'active' or 'past'
+
 
 // Check if we should auto-open edit modal from URL param
 function checkEditParam() {
@@ -121,7 +124,7 @@ function renderProjectCard(project) {
     `;
 }
 
-// Render pagination buttons
+// Render pagination buttons — Prev / Page X of Y / Next
 function renderPagination(totalProjects) {
     const totalPages = Math.ceil(totalProjects / PROJECTS_PER_PAGE);
     const paginationContainer = document.getElementById('projectPagination');
@@ -131,25 +134,19 @@ function renderPagination(totalProjects) {
         return;
     }
 
-    let buttonsHTML = '';
+    const prevBtn = currentPage > 1
+        ? `<button class="pagination-btn" onclick="changePage(${currentPage - 1})">Previous</button>`
+        : `<button class="pagination-btn" disabled>Previous</button>`;
 
-    // Previous button
-    if (currentPage > 1) {
-        buttonsHTML += `<button class="pagination-btn" onclick="changePage(${currentPage - 1})">Previous</button>`;
-    }
+    const nextBtn = currentPage < totalPages
+        ? `<button class="pagination-btn" onclick="changePage(${currentPage + 1})">Next</button>`
+        : `<button class="pagination-btn" disabled>Next</button>`;
 
-    // Page numbers
-    for (let i = 1; i <= totalPages; i++) {
-        const activeClass = i === currentPage ? 'active' : '';
-        buttonsHTML += `<button class="pagination-btn ${activeClass}" onclick="changePage(${i})">${i}</button>`;
-    }
-
-    // Next button
-    if (currentPage < totalPages) {
-        buttonsHTML += `<button class="pagination-btn" onclick="changePage(${currentPage + 1})">Next</button>`;
-    }
-
-    paginationContainer.innerHTML = buttonsHTML;
+    paginationContainer.innerHTML = `
+        ${prevBtn}
+        <button class="pagination-btn active">${currentPage} / ${totalPages}</button>
+        ${nextBtn}
+    `;
 }
 
 // Change page
@@ -170,8 +167,8 @@ function switchTab(tab) {
     document.getElementById(tab + 'Content').classList.add('active');
 
     if (tab === 'pending') {
-        // Hide pagination (pending has no pagination)
         document.getElementById('projectPagination').innerHTML = '';
+        pendingPage = 1;
         loadPendingRequests();
     } else {
         renderProjects();
@@ -355,8 +352,6 @@ document.getElementById('createProjectForm').addEventListener('submit', async (e
         document.getElementById('repoSlidebox').classList.remove('open');
         newProjectForm.style.display = 'none';
 
-        console.log('Project created:', data.project);
-
     } catch (error) {
         console.error('Create project error:', error);
         showToast('Failed to create project. Please try again.', 'error');
@@ -414,16 +409,35 @@ async function loadPendingRequests(force = false) {
 
 function renderPendingRequests() {
     const container = document.getElementById('pendingRequestsContainer');
+    const paginationEl = document.getElementById('pendingPagination');
     const requests = Object.values(pendingRequestsCache);
+
     if (requests.length === 0) {
         container.innerHTML = '<p class="text-muted empty-state">No pending requests.</p>';
+        if (paginationEl) paginationEl.innerHTML = '';
         return;
     }
-    container.innerHTML = requests.map(r => `
+
+    // Paginate
+    const totalPages = Math.ceil(requests.length / PENDING_PER_PAGE);
+    const start = (pendingPage - 1) * PENDING_PER_PAGE;
+    const page = requests.slice(start, start + PENDING_PER_PAGE);
+
+    container.innerHTML = page.map(r => {
+        // Chat status indicator
+        let chatStatus = '';
+        if (r.last_message_at) {
+            if (r.last_message_sender_id && r.last_message_sender_id !== currentUserId) {
+                chatStatus = '<span class="req-chat-status req-chat-new">New reply</span>';
+            } else {
+                chatStatus = '<span class="req-chat-status req-chat-waiting">Waiting</span>';
+            }
+        }
+        return `
         <div class="card card-sm card-bottom-gap">
             <div class="flex-between-center">
                 <div class="pending-card-clickable" onclick="openApplicantChat('${r.id}')">
-                    <div class="member-name">${escapeHtml(r.project_name)}</div>
+                    <div class="member-name">${escapeHtml(r.project_name)} ${chatStatus}</div>
                     <div class="member-joined">Applied ${formatDate(r.created_at)}</div>
                     ${r.message ? `<div class="text-muted pending-card-message">"${escapeHtml(r.message)}"</div>` : ''}
                 </div>
@@ -432,8 +446,29 @@ function renderPendingRequests() {
                     <button class="btn btn-sm btn-outline btn-danger" onclick="cancelRequest('${r.id}', event)">Cancel</button>
                 </div>
             </div>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
+
+    // Render pagination
+    if (paginationEl) {
+        if (totalPages <= 1) {
+            paginationEl.innerHTML = '';
+        } else {
+            let btns = '';
+            const prevBtn = pendingPage > 1
+                ? `<button class="pagination-btn" onclick="changePendingPage(${pendingPage - 1})">Previous</button>`
+                : `<button class="pagination-btn" disabled>Previous</button>`;
+            const nextBtn = pendingPage < totalPages
+                ? `<button class="pagination-btn" onclick="changePendingPage(${pendingPage + 1})">Next</button>`
+                : `<button class="pagination-btn" disabled>Next</button>`;
+            paginationEl.innerHTML = `${prevBtn}<button class="pagination-btn active">${pendingPage} / ${totalPages}</button>${nextBtn}`;
+        }
+    }
+}
+
+function changePendingPage(page) {
+    pendingPage = page;
+    renderPendingRequests();
 }
 
 function cancelRequest(requestId, event) {
@@ -564,6 +599,8 @@ async function sendApplicantMessage() {
         if (data.success) {
             input.value = '';
             fetchApplicantMessages();
+            loadPendingRequests(true);
+            if (typeof fetchNotifRequests === 'function') fetchNotifRequests();
         } else {
             showToast(data.message || 'Failed to send', 'error');
         }
@@ -937,5 +974,8 @@ document.getElementById('editProjectForm').addEventListener('submit', async (e) 
 // Fetch projects on page load, then reveal content
 (async function initProjects() {
     await Promise.all([fetchProjects(), loadGithubRepos()]);
+    const tabParam = new URLSearchParams(window.location.search).get('tab');
+    if (tabParam === 'pending') switchTab('pending');
+    else if (tabParam === 'past') switchTab('past');
     showMainContent();
 })();

@@ -178,6 +178,34 @@ async function initDatabase() {
     )
   `);
 
+  // Health issue acknowledgments — creator/mod can mark issues as read
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS health_reads (
+      project_id TEXT NOT NULL,
+      issue_key TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      read_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (project_id, issue_key, user_id),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      project_id TEXT,
+      project_name TEXT NOT NULL,
+      meta JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      read_at TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS notifications_user_unread
+      ON notifications(user_id) WHERE read_at IS NULL;
+  `);
+
   console.log('Database initialized');
 }
 
@@ -206,6 +234,30 @@ const userDb = {
   async findById(id) {
     const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
     return rows[0] || null;
+  },
+
+  // Update profile fields dynamically — only provided fields are updated
+  async updateProfile(userId, { username, email, password }) {
+    const sets = [];
+    const values = [];
+    let i = 1;
+
+    if (username !== undefined) {
+      sets.push(`username = $${i++}`, `username_lower = $${i++}`);
+      values.push(username, username.toLowerCase());
+    }
+    if (email !== undefined) {
+      sets.push(`email = $${i++}`);
+      values.push(email.toLowerCase());
+    }
+    if (password !== undefined) {
+      sets.push(`password = $${i++}`);
+      values.push(password);
+    }
+
+    if (sets.length === 0) return;
+    values.push(userId);
+    await pool.query(`UPDATE users SET ${sets.join(', ')} WHERE id = $${i}`, values);
   },
 
   // Public profile: basic info + active project history (for join request preview)
@@ -1108,6 +1160,91 @@ const githubDb = {
   }
 };
 
+const healthReadDb = {
+  // Get all acks for a project — returns [{issue_key, role}, ...]
+  async getReadsForProject(projectId) {
+    const { rows } = await pool.query(
+      `SELECT issue_key, role FROM health_reads WHERE project_id = $1`,
+      [projectId]
+    );
+    return rows;
+  },
+
+  // Mark an issue as read — idempotent (ON CONFLICT DO NOTHING)
+  async markRead(projectId, issueKey, userId, role) {
+    await pool.query(
+      `INSERT INTO health_reads (project_id, issue_key, user_id, role)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (project_id, issue_key, user_id) DO NOTHING`,
+      [projectId, issueKey, userId, role]
+    );
+  },
+
+  // Unmark an issue — delete the row
+  async markUnread(projectId, issueKey, userId) {
+    await pool.query(
+      `DELETE FROM health_reads WHERE project_id = $1 AND issue_key = $2 AND user_id = $3`,
+      [projectId, issueKey, userId]
+    );
+  },
+
+  // Dismiss an issue entirely — removes all acks for this issue key
+  async dismissIssue(projectId, issueKey) {
+    await pool.query(
+      `DELETE FROM health_reads WHERE project_id = $1 AND issue_key = $2`,
+      [projectId, issueKey]
+    );
+  },
+
+  // Check if issue is resolved by creator
+  async isResolvedByCreator(projectId, issueKey) {
+    const { rows } = await pool.query(
+      `SELECT 1 FROM health_reads WHERE project_id = $1 AND issue_key = $2 AND role = 'creator' LIMIT 1`,
+      [projectId, issueKey]
+    );
+    return rows.length > 0;
+  }
+};
+
+const notificationDb = {
+  async create(userId, type, projectId, projectName, meta = null) {
+    const id = require('crypto').randomUUID();
+    await pool.query(
+      `INSERT INTO notifications (id, user_id, type, project_id, project_name, meta)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, userId, type, projectId, projectName, meta ? JSON.stringify(meta) : null]
+    );
+    return id;
+  },
+
+  async getUnread(userId) {
+    const { rows } = await pool.query(
+      `SELECT id, type, project_id, project_name, meta, created_at
+       FROM notifications
+       WHERE user_id = $1 AND read_at IS NULL
+       ORDER BY created_at DESC`,
+      [userId]
+    );
+    return rows;
+  },
+
+  async markRead(notificationId, userId) {
+    await pool.query(
+      `UPDATE notifications SET read_at = NOW()
+       WHERE id = $1 AND user_id = $2`,
+      [notificationId, userId]
+    );
+  },
+
+  async markAllRead(userId) {
+    await pool.query(
+      `UPDATE notifications SET read_at = NOW()
+       WHERE user_id = $1 AND read_at IS NULL`,
+      [userId]
+    );
+  }
+};
+
 module.exports = {
   pool,
   initDatabase,
@@ -1118,5 +1255,7 @@ module.exports = {
   joinRequestDb,
   joinRequestMessageDb,
   githubDb,
-  kickVoteDb
+  kickVoteDb,
+  healthReadDb,
+  notificationDb
 };

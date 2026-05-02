@@ -253,8 +253,8 @@ describe('GET /api/github/repos', () => {
     jest.spyOn(global, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: async () => ([
-        { full_name: 'testghuser/repo-a', private: false },
-        { full_name: 'testghuser/repo-b', private: true }
+        { full_name: 'testghuser/repo-a', private: false, owner: { login: 'testghuser' } },
+        { full_name: 'testghuser/repo-b', private: true, owner: { login: 'testghuser' } }
       ])
     });
 

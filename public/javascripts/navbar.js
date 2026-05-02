@@ -286,15 +286,18 @@ let notifKickVotes = [];
 // Unread chat messages for applicants (requests where last message is from management)
 let notifChatMessages = [];
 
+// System notifications (accepted, rejected, kicked, project_deleted, project_completed)
+let notifSystem = [];
 
 // Fetch join requests for all management projects (creator + moderator) + pending kick votes
 async function fetchNotifRequests() {
     try {
         // Run all fetches in parallel
-        const [projectsRes, kickRes, myReqRes] = await Promise.all([
+        const [projectsRes, kickRes, myReqRes, sysRes] = await Promise.all([
             fetch('/api/projects'),
             fetch('/api/projects/me/kick-votes/pending'),
-            fetch('/api/projects/my-requests')
+            fetch('/api/projects/my-requests'),
+            fetch('/api/notifications')
         ]);
 
         // Management join requests
@@ -336,7 +339,7 @@ async function fetchNotifRequests() {
             notifKickVotes = kickData.votes || [];
         }
 
-        // Applicant notifications: unread chat messages + accepted requests
+        // Applicant notifications: unread chat messages
         if (myReqRes.ok) {
             const myReqData = await myReqRes.json();
             notifChatMessages = (myReqData.requests || []).filter(r =>
@@ -344,6 +347,12 @@ async function fetchNotifRequests() {
                 r.last_message_sender_id &&
                 r.last_message_sender_id !== (window._currentUserId || '')
             ).map(r => ({ ...r, _notifType: 'chat' }));
+        }
+
+        // System notifications (accepted, rejected, kicked, project_deleted, project_completed)
+        if (sysRes.ok) {
+            const sysData = await sysRes.json();
+            notifSystem = sysData.notifications || [];
         }
 
         updateNotifBadge();
@@ -357,7 +366,7 @@ async function fetchNotifRequests() {
 function updateNotifBadge() {
     const badge = document.getElementById('notifBadge');
     if (!badge) return;
-    const total = notifRequests.filter(r => r.notifKind).length + notifKickVotes.length + notifChatMessages.length;
+    const total = notifRequests.filter(r => r.notifKind).length + notifKickVotes.length + notifChatMessages.length + notifSystem.length;
     if (total > 0) {
         badge.textContent = total;
         badge.style.display = 'flex';
@@ -366,58 +375,86 @@ function updateNotifBadge() {
     }
 }
 
-// Render notification panel content (join requests + kick vote notifications)
+// Render notification panel content (join requests + kick vote notifications + system)
 function renderNotifPanel() {
     const body = document.getElementById('notifPanelBody');
     if (!body) return;
 
     const activeRequests = notifRequests.filter(r => r.notifKind);
-    const total = activeRequests.length + notifKickVotes.length + notifChatMessages.length;
+    const total = activeRequests.length + notifKickVotes.length + notifChatMessages.length + notifSystem.length;
     if (total === 0) {
         body.innerHTML = '<div class="notif-empty">No pending notifications</div>';
         return;
     }
 
     const requestsHTML = activeRequests.map(req => `
-        <div class="notif-item" id="notif-${req.id}">
-            <div class="notif-item-info">
-                <div class="notif-item-type ${req.notifKind === 'join' ? 'notif-type-join' : 'notif-type-chat'}">${req.notifKind === 'join' ? 'Join Request' : 'Join Request Chat'}</div>
-                <div class="notif-item-project">${req.projectName}</div>
-                <div class="notif-item-user">${req.username} · ${notifFormatDate(req.created_at)}</div>
+        <div class="notif-item-sys ${req.notifKind === 'join' ? 'nc-join' : 'nc-chat'}" id="notif-${req.id}">
+            <div class="notif-sys-left">
+                <span class="notif-sys-title">${req.projectName}</span>
+                <span class="notif-sys-sub">${req.notifKind === 'join' ? 'Join request' : 'New message'} · ${req.username} · ${notifFormatDate(req.created_at)}</span>
             </div>
-            <div class="notif-item-actions">
-                <a class="notif-btn notif-btn-accept" href="/pages/project-detail.html?id=${req.projectId}">Review</a>
+            <div class="notif-sys-right">
+                <a class="notif-btn-action" href="/pages/project-detail.html?id=${req.projectId}&tab=admin">Review →</a>
             </div>
         </div>
     `).join('');
 
     const kickVotesHTML = notifKickVotes.map(v => `
-        <div class="notif-item">
-            <div class="notif-item-info">
-                <div class="notif-item-type notif-type-kick">Kick Vote</div>
-                <div class="notif-item-project">${v.project_name}</div>
-                <div class="notif-item-user">Kick ${v.target_username} · by ${v.initiator_username}</div>
+        <div class="notif-item-sys nc-kick">
+            <div class="notif-sys-left">
+                <span class="notif-sys-title">${v.project_name}</span>
+                <span class="notif-sys-sub">Kick vote · ${v.target_username} by ${v.initiator_username}</span>
             </div>
-            <div class="notif-item-actions">
-                <a class="notif-btn notif-btn-accept" href="/pages/project-detail.html?id=${v.project_id}">Vote</a>
+            <div class="notif-sys-right">
+                <a class="notif-btn-action" href="/pages/project-detail.html?id=${v.project_id}">Vote →</a>
             </div>
         </div>
     `).join('');
 
     const chatHTML = notifChatMessages.map(r => `
-        <div class="notif-item">
-            <div class="notif-item-info">
-                <div class="notif-item-type notif-type-chat">Join Request Chat</div>
-                <div class="notif-item-project">${r.project_name}</div>
-                <div class="notif-item-user">${notifFormatDate(r.last_message_at)}</div>
+        <div class="notif-item-sys nc-chat">
+            <div class="notif-sys-left">
+                <span class="notif-sys-title">${r.project_name}</span>
+                <span class="notif-sys-sub">New message · ${notifFormatDate(r.last_message_at)}</span>
             </div>
-            <div class="notif-item-actions">
-                <a class="notif-btn notif-btn-accept" href="/pages/projects.html">Open</a>
+            <div class="notif-sys-right">
+                <a class="notif-btn-action" href="/pages/projects.html?tab=pending">Open →</a>
             </div>
         </div>
     `).join('');
 
-    body.innerHTML = requestsHTML + kickVotesHTML + chatHTML;
+    const sysConfig = {
+        accepted:          { cls: 'nc-accept', label: 'Accepted',          url: (n) => `/pages/project-detail.html?id=${n.project_id}` },
+        rejected:          { cls: 'nc-reject', label: 'Rejected',          url: null },
+        kicked:            { cls: 'nc-kick',   label: 'Kicked',            url: () => `/pages/projects.html?tab=past` },
+        project_deleted:   { cls: 'nc-deleted',label: 'Project deleted',   url: () => `/pages/projects.html?tab=past` },
+        project_completed: { cls: 'nc-done',   label: 'Project completed', url: () => `/pages/projects.html?tab=past` }
+    };
+
+    const systemHTML = notifSystem.map(n => {
+        const cfg = sysConfig[n.type] || { cls: '', label: n.type, url: null };
+        const url = cfg.url ? cfg.url(n) : null;
+        return `
+        <div class="notif-item-sys ${cfg.cls}" data-id="${n.id}">
+            <div class="notif-sys-left">
+                <span class="notif-sys-title">${n.project_name}</span>
+                <span class="notif-sys-sub">${cfg.label} · ${notifFormatDate(n.created_at)}</span>
+            </div>
+            <div class="notif-sys-right">
+                ${url ? `<a class="notif-btn-action" href="${url}">View →</a>` : ''}
+                <button class="notif-btn-dismiss" onclick="event.stopPropagation(); dismissSysNotif('${n.id}', this.closest('.notif-item-sys'))">✕</button>
+            </div>
+        </div>`;
+    }).join('');
+
+    body.innerHTML = requestsHTML + kickVotesHTML + chatHTML + systemHTML;
+}
+
+async function dismissSysNotif(id, el) {
+    el.remove();
+    notifSystem = notifSystem.filter(n => n.id !== id);
+    updateNotifBadge();
+    fetch(`/api/notifications/read/${id}`, { method: 'POST' }).catch(() => {});
 }
 
 // Format date for notifications

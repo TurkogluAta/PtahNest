@@ -196,29 +196,37 @@ describe('DELETE /api/projects/:id/leave (Leave Project)', () => {
   });
 });
 
-describe('DELETE /api/projects/:id/members/:memberId (Kick Member)', () => {
-  test('creator should kick a member', async () => {
+// Kick voting system — direct kick replaced by democratic vote (70% threshold)
+describe('Kick Voting System', () => {
+  // Helper: accept a join request and return member's user_id
+  async function acceptMember(creator, projectId) {
+    const reqsRes = await creator.get(`/api/projects/${projectId}/requests`);
+    const requestId = reqsRes.body.requests[0].id;
+    await creator.patch(`/api/projects/${projectId}/requests/${requestId}`).send({ action: 'accept' });
+    const membersRes = await creator.get(`/api/projects/${projectId}/members`);
+    return membersRes.body.members.find(m => m.role === 'member').user_id;
+  }
+
+  test('creator can start a kick vote and it passes when threshold met', async () => {
     const { agent: creator } = await registerAndLogin(app);
     const project = await createProject(creator);
 
-    // Add a member
     const { agent: member } = await registerAndLogin(app);
     await member.post(`/api/projects/${project.id}/join`).send({});
+    const memberId = await acceptMember(creator, project.id);
 
-    const reqsRes = await creator.get(`/api/projects/${project.id}/requests`);
-    const requestId = reqsRes.body.requests[0].id;
-    await creator
-      .patch(`/api/projects/${project.id}/requests/${requestId}`)
-      .send({ action: 'accept' });
+    // Start kick vote
+    const voteRes = await creator.post(`/api/projects/${project.id}/kick-votes`).send({ targetUserId: memberId });
+    expect(voteRes.status).toBe(201);
+    const voteId = voteRes.body.vote.id;
 
-    // Get member ID
-    const membersRes = await creator.get(`/api/projects/${project.id}/members`);
-    const memberId = membersRes.body.members.find(m => m.role === 'member').user_id;
+    // Creator votes yes — 1/1 = 100% >= 70%, vote passes on next read
+    await creator.post(`/api/projects/${project.id}/kick-votes/${voteId}/ballot`).send({ ballot: 'yes' });
 
-    // Kick
-    const res = await creator.delete(`/api/projects/${project.id}/members/${memberId}`);
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
+    // Trigger lazy resolve by fetching votes
+    const votesRes = await creator.get(`/api/projects/${project.id}/kick-votes`);
+    const resolvedVote = votesRes.body.votes.find(v => v.id === voteId);
+    expect(resolvedVote.status).toBe('passed');
   });
 
   test('kicked member should not be able to rejoin', async () => {
@@ -227,16 +235,15 @@ describe('DELETE /api/projects/:id/members/:memberId (Kick Member)', () => {
 
     const { agent: member } = await registerAndLogin(app);
     await member.post(`/api/projects/${project.id}/join`).send({});
+    const memberId = await acceptMember(creator, project.id);
 
-    const reqsRes = await creator.get(`/api/projects/${project.id}/requests`);
-    const requestId = reqsRes.body.requests[0].id;
-    await creator
-      .patch(`/api/projects/${project.id}/requests/${requestId}`)
-      .send({ action: 'accept' });
+    // Start vote, creator votes yes — passes immediately (1/1)
+    const voteRes = await creator.post(`/api/projects/${project.id}/kick-votes`).send({ targetUserId: memberId });
+    const voteId = voteRes.body.vote.id;
+    await creator.post(`/api/projects/${project.id}/kick-votes/${voteId}/ballot`).send({ ballot: 'yes' });
 
-    const membersRes = await creator.get(`/api/projects/${project.id}/members`);
-    const memberId = membersRes.body.members.find(m => m.role === 'member').user_id;
-    await creator.delete(`/api/projects/${project.id}/members/${memberId}`);
+    // Trigger lazy resolve
+    await creator.get(`/api/projects/${project.id}/kick-votes`);
 
     // Kicked member tries to rejoin
     const res = await member.post(`/api/projects/${project.id}/join`).send({});
@@ -244,25 +251,17 @@ describe('DELETE /api/projects/:id/members/:memberId (Kick Member)', () => {
     expect(res.body.message).toContain('removed');
   });
 
-  test('non-creator should not kick', async () => {
+  test('non-member should not be able to start a kick vote', async () => {
     const { agent: creator } = await registerAndLogin(app);
     const project = await createProject(creator);
 
     const { agent: member } = await registerAndLogin(app);
     await member.post(`/api/projects/${project.id}/join`).send({});
+    const memberId = await acceptMember(creator, project.id);
 
-    const reqsRes = await creator.get(`/api/projects/${project.id}/requests`);
-    const requestId = reqsRes.body.requests[0].id;
-    await creator
-      .patch(`/api/projects/${project.id}/requests/${requestId}`)
-      .send({ action: 'accept' });
-
-    const membersRes = await creator.get(`/api/projects/${project.id}/members`);
-    const memberId = membersRes.body.members.find(m => m.role === 'member').user_id;
-
-    // Another user tries to kick
+    // Outsider tries to start kick vote
     const { agent: other } = await registerAndLogin(app);
-    const res = await other.delete(`/api/projects/${project.id}/members/${memberId}`);
+    const res = await other.post(`/api/projects/${project.id}/kick-votes`).send({ targetUserId: memberId });
     expect(res.status).toBe(403);
   });
 });

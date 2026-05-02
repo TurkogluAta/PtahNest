@@ -274,9 +274,56 @@ const paramUserIdValidation = [
   handleValidationErrors
 ];
 
+// Update profile validation
+const updateProfileValidation = [
+  body('username')
+    .optional({ values: 'null' })
+    .trim()
+    .isLength({ min: 3, max: 30 })
+    .withMessage('Username must be between 3 and 30 characters')
+    .matches(/^[a-zA-Z0-9_]+$/)
+    .withMessage('Username can only contain letters, numbers, and underscores')
+    .escape(),
+
+  body('email')
+    .optional({ values: 'null' })
+    .trim()
+    .isEmail()
+    .withMessage('Please provide a valid email address')
+    .normalizeEmail()
+    .isLength({ max: 254 })
+    .withMessage('Email must not exceed 254 characters'),
+
+  body('currentPassword')
+    .optional()
+    .isString()
+    .withMessage('Current password must be a string'),
+
+  body('newPassword')
+    .optional()
+    .isLength({ min: 8 })
+    .withMessage('New password must be at least 8 characters')
+    .matches(/[A-Z]/)
+    .withMessage('New password must contain at least one uppercase letter')
+    .matches(/[0-9]/)
+    .withMessage('New password must contain at least one number')
+    .matches(/[!@#$%^&*(),.?":{}|<>]/)
+    .withMessage('New password must contain at least one special character'),
+
+  handleValidationErrors
+];
+
+const healthReadValidation = [
+  body('issueKey').isString().isLength({ min: 1, max: 200 }).withMessage('Invalid issue key'),
+  body('role').isIn(['creator', 'moderator']).withMessage('Role must be creator or moderator'),
+  body('read').isBoolean().withMessage('read must be a boolean'),
+  handleValidationErrors
+];
+
 module.exports = {
   registerValidation,
   loginValidation,
+  updateProfileValidation,
   createProjectValidation,
   updateProjectValidation,
   joinRequestValidation,
@@ -289,5 +336,6 @@ module.exports = {
   kickVoteValidation,
   ballotValidation,
   messageContentValidation,
-  paramUserIdValidation
+  paramUserIdValidation,
+  healthReadValidation
 };

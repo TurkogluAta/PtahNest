@@ -15,6 +15,9 @@ async function setupDatabase() {
 
 // Clean all test data from database
 async function cleanDatabase() {
+  await pool.query('DELETE FROM notifications');
+  await pool.query('DELETE FROM kick_vote_ballots');
+  await pool.query('DELETE FROM kick_votes');
   await pool.query('DELETE FROM join_requests');
   await pool.query('DELETE FROM project_members');
   await pool.query('DELETE FROM projects');

@@ -437,6 +437,17 @@ body::after {
 }
 
 /* Message alerts */
+.message {
+    padding: 0.6rem 0.85rem;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    display: none;
+}
+
+.message.show {
+    display: block;
+}
+
 .message.error {
     background: rgba(239, 68, 68, 0.15);
     border-left: 3px solid #ef4444;
@@ -447,6 +458,12 @@ body::after {
     background: rgba(16, 185, 129, 0.15);
     border-left: 3px solid #10b981;
     color: #6ee7b7;
+}
+
+.message.info {
+    background: rgba(102, 126, 234, 0.15);
+    border-left: 3px solid var(--primary);
+    color: var(--primary-light);
 }
 
 /* =========================================================
@@ -1018,6 +1035,7 @@ body::after {
 .btn {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 0.5rem;
     padding: 0.75rem 1.5rem;
     border: none;
@@ -1794,14 +1812,125 @@ textarea.input-field {
 }
 
 /* Profile page styles */
+/* Profile hero */
+.profile-hero {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    margin-bottom: 1.75rem;
+}
+
+.profile-avatar-large {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary), var(--primary-light));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    font-weight: 700;
+    color: #fff;
+    flex-shrink: 0;
+    letter-spacing: -0.02em;
+}
+
+.profile-hero-name {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-1);
+    margin-bottom: 0.25rem;
+}
+
+.profile-hero-meta {
+    font-size: 0.85rem;
+    color: var(--text-3);
+}
+
+/* Two-column grid */
+.profile-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    margin-bottom: 1.25rem;
+}
+
 .profile-card {
-    margin-top: 2rem;
-    padding: 2rem;
+    padding: 1.75rem;
+    margin-top: 0;
+}
+
+.profile-card-github {
+    margin-bottom: 0;
 }
 
 .profile-data {
     font-size: 1.1rem;
     margin-top: 0.5rem;
+}
+
+.profile-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.25rem;
+}
+
+.profile-card-header .card-title {
+    margin: 0;
+}
+
+.profile-github-left {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.profile-info-row {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.profile-info-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.profile-info-label {
+    font-size: 0.75rem;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    min-width: 90px;
+    flex-shrink: 0;
+}
+
+.profile-info-value {
+    font-size: 0.95rem;
+    color: var(--text-1);
+}
+
+.profile-edit-form {
+    display: none;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.profile-edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+}
+
+@media (max-width: 768px) {
+    .profile-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 /* Auth page checkbox spacing */
@@ -2170,6 +2299,11 @@ textarea.input-field {
 
 .commit-sha:hover {
     text-decoration: underline;
+}
+
+#commitsContainer,
+#commitsPagination {
+    transition: opacity 0.15s ease;
 }
 
 .commits-loading {
@@ -2608,7 +2742,7 @@ textarea.input-field {
 .notif-panel {
     display: none;
     position: absolute;
-    top: calc(100% + 0.75rem);
+    top: 50px;
     right: 0;
     width: 360px;
     max-height: 420px;
@@ -2618,7 +2752,6 @@ textarea.input-field {
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
     z-index: 200;
     overflow: hidden;
-    animation: fadeIn 0.2s ease;
 }
 
 .notif-panel.open {
@@ -2645,44 +2778,92 @@ textarea.input-field {
     font-size: 0.85rem;
 }
 
-.notif-item {
-    padding: 0.875rem 1.25rem;
+.notif-item-sys {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.6rem 1rem 0.6rem 0.75rem;
     border-bottom: 1px solid var(--border);
-    transition: background 0.15s;
+    border-left: 3px solid transparent;
+    transition: background 0.1s;
 }
 
-.notif-item:last-child {
+.notif-item-sys:last-child {
     border-bottom: none;
 }
 
-.notif-item:hover {
+.notif-item-sys:hover {
     background: var(--surface);
 }
 
-.notif-item-info {
-    margin-bottom: 0.5rem;
+/* Left border color by type */
+.notif-item-sys.nc-join    { border-left-color: var(--primary); }
+.notif-item-sys.nc-chat    { border-left-color: #22c55e; }
+.notif-item-sys.nc-kick    { border-left-color: #ef4444; }
+.notif-item-sys.nc-accept  { border-left-color: #22c55e; }
+.notif-item-sys.nc-reject  { border-left-color: var(--text-3); }
+.notif-item-sys.nc-deleted { border-left-color: var(--text-3); }
+.notif-item-sys.nc-done    { border-left-color: var(--primary); }
+
+.notif-sys-left {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+    flex: 1;
 }
 
-.notif-item-type {
-    font-size: 0.68rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin-bottom: 0.2rem;
+.notif-sys-title {
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.notif-type-join {
+.notif-sys-sub {
+    font-size: 0.72rem;
+    color: var(--text-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.notif-sys-right {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+}
+
+.notif-btn-action {
+    font-size: 0.72rem;
     color: var(--primary);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: opacity 0.15s;
 }
 
-.notif-type-kick {
-    color: #ef4444;
+.notif-btn-action:hover {
+    opacity: 0.7;
 }
 
-.notif-type-chat {
-    color: #22c55e;
+.notif-btn-dismiss {
+    background: none;
+    border: none;
+    color: var(--text-3);
+    font-size: 0.7rem;
+    cursor: pointer;
+    padding: 0.1rem 0.25rem;
+    line-height: 1;
+    transition: color 0.15s;
 }
 
+.notif-btn-dismiss:hover {
+    color: var(--text-1);
+}
 
 .notif-item-user {
     font-size: 0.75rem;
@@ -2771,7 +2952,8 @@ textarea.input-field {
 .confirm-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(8px);
     z-index: 10000;
     display: flex;
     align-items: center;
@@ -3395,7 +3577,7 @@ textarea.input-field {
 }
 
 .health-page-btn {
-    width: 28px;
+    min-width: 28px;
     height: 28px;
     display: inline-flex;
     align-items: center;
@@ -3403,6 +3585,7 @@ textarea.input-field {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 6px;
+    padding: 0 0.5rem;
     color: var(--text-2);
     font-size: 0.85rem;
     cursor: pointer;
@@ -3420,6 +3603,13 @@ textarea.input-field {
 .health-page-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+}
+
+.health-page-btn.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+    font-weight: 600;
 }
 
 .health-ok {
@@ -3448,8 +3638,19 @@ textarea.input-field {
     transition: opacity 0.2s;
 }
 
-.health-issue-read {
+.health-issue-read .health-issue-body {
     opacity: 0.45;
+}
+
+.health-delete-btn {
+    width: 28px !important;
+    min-width: 28px !important;
+    height: 28px;
+    padding: 0 !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
 }
 
 .health-issue-body {
@@ -3457,60 +3658,44 @@ textarea.input-field {
     min-width: 0;
 }
 
-.health-issue-marks {
-    display: flex;
-    gap: 0.5rem;
-    flex-shrink: 0;
-}
-
-.health-mark {
+.health-issue-actions {
     display: flex;
     align-items: center;
-    gap: 0.3rem;
-    padding: 0.2rem 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.72rem;
-    color: var(--text-2);
-    user-select: none;
-    transition: background 0.15s, border-color 0.15s;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    width: 220px;
+    justify-content: flex-end;
 }
 
-.health-mark:hover:not(.health-mark-readonly) {
-    background: var(--bg-elevated);
-    border-color: var(--text-3);
+.health-issue-actions .btn {
+    min-width: 80px;
+    white-space: nowrap;
 }
 
-.health-mark-readonly {
-    cursor: default;
-    opacity: 0.7;
-}
-
-.health-mark-on {
-    background: rgba(102, 126, 234, 0.15);
-    border-color: var(--primary);
-    color: var(--text-1);
-}
-
-.health-mark-box {
-    width: 14px;
-    height: 14px;
-    border-radius: 3px;
-    border: 1px solid var(--border);
-    background: var(--bg);
+.health-resolved-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.7rem;
-    font-weight: 700;
-    color: var(--primary);
+    font-size: 0.75rem;
+    color: #6ee7b7;
+    font-weight: 600;
+    white-space: nowrap;
+    min-width: 80px;
+    text-align: center;
 }
 
-.health-mark-on .health-mark-box {
-    background: var(--primary);
+.health-mod-badge {
+    font-size: 0.72rem;
+    color: var(--primary-light);
+    white-space: nowrap;
+    font-weight: 500;
+    margin-top: 0.3rem;
+}
+
+.health-mod-acked {
+    background: rgba(102, 126, 234, 0.15);
     border-color: var(--primary);
-    color: white;
+    color: var(--text-1);
 }
 
 .health-issue-warn {
