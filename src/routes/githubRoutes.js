@@ -182,7 +182,7 @@ router.get('/commits/:projectId', requireAuth, async (req, res) => {
 
     const accessToken = decrypt(info.github_token);
     const page = parseInt(req.query.page) || 1;
-    const perPage = 30;
+    const perPage = 5;
 
     // Fetch commits from GitHub API (paginated)
     const response = await fetch(

@@ -3,7 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const { userDb, loginAttemptDb } = require('../models/database');
 const { setSessionFingerprint } = require('../middleware/sessionSecurity');
-const { registerValidation, loginValidation } = require('../middleware/validators');
+const { registerValidation, loginValidation, updateProfileValidation } = require('../middleware/validators');
 
 // REGISTER endpoint
 router.post('/register', registerValidation, async (req, res) => {
@@ -160,8 +160,71 @@ router.get('/me', async (req, res) => {
 
   res.json({
     success: true,
-    user: { id: user.id, username: user.username, email: user.email }
+    user: { id: user.id, username: user.username, email: user.email, created_at: user.created_at }
   });
+});
+
+// UPDATE PROFILE endpoint — username, email, and/or password
+router.put('/profile', updateProfileValidation, async (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ success: false, message: 'Not authenticated' });
+  }
+
+  try {
+    const { username, email, currentPassword, newPassword } = req.body;
+    const user = await userDb.findById(req.session.userId);
+    if (!user) return res.status(401).json({ success: false, message: 'User not found' });
+
+    const updates = {};
+
+    // Check username uniqueness if changing
+    if (username && username !== user.username) {
+      const existing = await userDb.findByEmailOrUsername(username);
+      if (existing && existing.id !== user.id) {
+        return res.status(409).json({ success: false, message: 'Username already taken' });
+      }
+      updates.username = username;
+    }
+
+    // Check email uniqueness if changing
+    if (email && email.toLowerCase() !== user.email) {
+      const existing = await userDb.findByEmailOrUsername(email);
+      if (existing && existing.id !== user.id) {
+        return res.status(409).json({ success: false, message: 'Email already in use' });
+      }
+      updates.email = email;
+    }
+
+    // Password change — requires currentPassword
+    if (newPassword) {
+      if (!currentPassword) {
+        return res.status(400).json({ success: false, message: 'Current password is required to set a new password' });
+      }
+      const isValid = await bcrypt.compare(currentPassword, user.password);
+      if (!isValid) {
+        return res.status(400).json({ success: false, message: 'Current password is incorrect' });
+      }
+      updates.password = await bcrypt.hash(newPassword, 12);
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ success: false, message: 'No changes provided' });
+    }
+
+    await userDb.updateProfile(req.session.userId, updates);
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: {
+        username: updates.username || user.username,
+        email: updates.email ? updates.email.toLowerCase() : user.email
+      }
+    });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
 });
 
 module.exports = router;

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { projectDb, userDb, memberDb, joinRequestDb, joinRequestMessageDb, githubDb, kickVoteDb, pool } = require('../models/database');
+const { projectDb, userDb, memberDb, joinRequestDb, joinRequestMessageDb, githubDb, kickVoteDb, healthReadDb, notificationDb, pool } = require('../models/database');
 const { encrypt, decrypt } = require('../utils/encryption');
 const { sendCollaboratorInvite, createGithubRepo, removeGithubCollaborator, resolveGithubUsername } = require('./githubRoutes');
 const {
@@ -16,7 +16,8 @@ const {
   kickVoteValidation,
   ballotValidation,
   messageContentValidation,
-  paramUserIdValidation
+  paramUserIdValidation,
+  healthReadValidation
 } = require('../middleware/validators');
 
 // Middleware: Check if user is authenticated
@@ -315,13 +316,23 @@ router.patch('/:id/recruitment', requireAuth, paramIdValidation, requireManageme
 // COMPLETE: Mark project as completed (creator only)
 router.patch('/:id/complete', requireAuth, paramIdValidation, async (req, res) => {
   try {
-    const success = await projectDb.complete(req.params.id, req.session.userId);
+    const projectId = req.params.id;
+    const project = await projectDb.findById(projectId);
+    const success = await projectDb.complete(projectId, req.session.userId);
 
     if (!success) {
       return res.status(404).json({
         success: false,
         message: 'Project not found, unauthorized, or already completed'
       });
+    }
+
+    // Notify all members except creator
+    if (project) {
+      const allMembers = await memberDb.getProjectMembers(projectId);
+      allMembers
+        .filter(m => m.user_id !== req.session.userId)
+        .forEach(m => notificationDb.create(m.user_id, 'project_completed', projectId, project.name).catch(() => {}));
     }
 
     res.json({
@@ -341,7 +352,10 @@ router.patch('/:id/complete', requireAuth, paramIdValidation, async (req, res) =
 // DELETE: Delete project
 router.delete('/:id', requireAuth, paramIdValidation, async (req, res) => {
   try {
-    const success = await projectDb.delete(req.params.id, req.session.userId);
+    const projectId = req.params.id;
+    const project = await projectDb.findById(projectId);
+    const allMembers = project ? await memberDb.getProjectMembers(projectId) : [];
+    const success = await projectDb.delete(projectId, req.session.userId);
 
     if (!success) {
       return res.status(404).json({
@@ -349,6 +363,11 @@ router.delete('/:id', requireAuth, paramIdValidation, async (req, res) => {
         message: 'Project not found or unauthorized'
       });
     }
+
+    // Notify all members except creator
+    allMembers
+      .filter(m => m.user_id !== req.session.userId)
+      .forEach(m => notificationDb.create(m.user_id, 'project_deleted', projectId, project.name).catch(() => {}));
 
     res.json({
       success: true,
@@ -554,6 +573,9 @@ router.patch('/:id/requests/:requestId', requireAuth, paramIdValidation, paramRe
         ? await sendCollaboratorInvite(projectId, joinRequest.user_id, project.github_repo, project.creator_id, joinRequest.github_id || null)
         : null;
 
+      // Notify applicant
+      notificationDb.create(joinRequest.user_id, 'accepted', projectId, project.name).catch(() => {});
+
       res.json({
         success: true,
         message: 'Join request accepted',
@@ -563,6 +585,9 @@ router.patch('/:id/requests/:requestId', requireAuth, paramIdValidation, paramRe
       // Reject request and delete chat messages
       await joinRequestDb.reject(requestId);
       await joinRequestMessageDb.deleteByRequestId(requestId);
+
+      // Notify applicant
+      notificationDb.create(joinRequest.user_id, 'rejected', projectId, project.name).catch(() => {});
 
       res.json({
         success: true,
@@ -750,6 +775,8 @@ async function resolveVoteIfNeeded(vote, project) {
     if (kickResult && project.projectType === 'software' && project.github_repo && kickResult.githubId) {
       await removeGithubCollaborator(kickResult.githubId, project.github_repo, project.creator_id);
     }
+    // Notify kicked user
+    notificationDb.create(vote.target_user_id, 'kicked', vote.project_id, project.name).catch(() => {});
     return { ...vote, status: 'passed' };
   }
 
@@ -1078,6 +1105,59 @@ router.get('/:id/health', requireAuth, paramIdValidation, requireManagement, asy
     res.json({ success: true, issues });
   } catch (err) {
     console.error('Health check error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET: Health issue read state for a project (creator + moderator)
+router.get('/:id/health-reads', requireAuth, paramIdValidation, requireManagement, async (req, res) => {
+  try {
+    const reads = await healthReadDb.getReadsForProject(req.params.id);
+    res.json({ success: true, reads });
+  } catch (err) {
+    console.error('Health reads GET error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST: Toggle health issue read state (creator or moderator, own role only)
+router.post('/:id/health-reads', requireAuth, paramIdValidation, requireManagement, healthReadValidation, async (req, res) => {
+  try {
+    const { issueKey, role, read } = req.body;
+    const userId = req.session.userId;
+
+    // Enforce: user can only toggle their own role's mark
+    if (role === 'creator' && !req.isCreator) {
+      return res.status(403).json({ success: false, message: 'Only the creator can mark as creator' });
+    }
+    if (role === 'moderator' && !req.isMod) {
+      return res.status(403).json({ success: false, message: 'Only moderators can mark as moderator' });
+    }
+
+    if (read) {
+      await healthReadDb.markRead(req.params.id, issueKey, userId, role);
+    } else {
+      await healthReadDb.markUnread(req.params.id, issueKey, userId);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Health reads POST error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// DELETE: Dismiss a health issue entirely (creator only)
+router.delete('/:id/health-reads/:issueKey', requireAuth, paramIdValidation, requireManagement, async (req, res) => {
+  try {
+    if (!req.isCreator) {
+      return res.status(403).json({ success: false, message: 'Only the creator can dismiss issues' });
+    }
+    const issueKey = decodeURIComponent(req.params.issueKey);
+    await healthReadDb.dismissIssue(req.params.id, issueKey);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Health reads DELETE error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
