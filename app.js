@@ -24,7 +24,8 @@ var app = express();
 
 // Trust proxy to get real IP when behind reverse proxy (nginx, cloudflare, etc.)
 // Should be true in production, false in development
-app.set('trust proxy', process.env.NODE_ENV === 'production');
+// Trust 1 hop (Nginx) — required for express-rate-limit X-Forwarded-For
+app.set('trust proxy', 1);
 
 // Initialize database (async - tables are created before server starts)
 // In test environment, tests handle initialization themselves
@@ -85,6 +86,7 @@ const authLimiter = rateLimit({
   message: 'Too many authentication attempts, please try again later',
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false, xForwardedForHeader: false },
   skip: (req) => req.path === '/me'
 });
 
@@ -94,7 +96,8 @@ const apiLimiter = rateLimit({
   max: isTest ? 10000 : 1000,
   message: 'Too many requests, please try again later',
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  validate: { trustProxy: false, xForwardedForHeader: false }
 });
 
 // Apply rate limiters
