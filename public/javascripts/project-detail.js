@@ -73,7 +73,7 @@ async function fetchMembers() {
             renderActions();
             initTabBar();
             loadKickVotes(); // active votes visible to all members
-            renderLeaderboard(); // mock leaderboard, fallback data if no commits yet
+            renderLeaderboard();
         } else {
             // User not authorized to view members
             const data = await response.json();
@@ -358,16 +358,12 @@ function renderRequestsPage() {
                 ? '<span class="req-chat-status req-chat-new">New Reply</span>'
                 : '<span class="req-chat-status req-chat-waiting">Waiting</span>';
 
-        // Mock applicant score — stable per request id (TODO: replace with real score)
-        const mockScore = (((parseInt(r.id.replace(/[^0-9]/g, '').slice(0, 4) || '1', 10) % 41) + 10) / 10);
-
         return `
         <div class="card card-sm card-bottom-gap req-card" onclick="openRequestDetail('${r.id}','${escapeHtml(r.username)}','${r.user_id}')">
             <div class="req-card-top">
                 <div class="req-card-left">
                     <div class="req-card-name-row">
                         <span class="member-name">${escapeHtml(r.username)}</span>
-                        ${renderCommitRating(mockScore)}
                     </div>
                     <div class="req-card-meta">
                         ${hasGithub ? `<span class="req-meta-badge"><img src="../pictures/icons/github.svg" width="11" height="11"> ${escapeHtml(r.github_username || 'GitHub')}</span>` : ''}
@@ -1132,12 +1128,8 @@ async function fetchApplicantProfile(userId) {
                 </a>`;
         }
 
-        // Mock star rating (placeholder until real system)
-        const starCount = Math.floor(Math.random() * 5) + 1;
-        const stars = Array.from({ length: 5 }, (_, i) =>
-            `<img src="../pictures/icons/${i < starCount ? 'star-filled' : 'star-outline'}.svg">`
-        ).join('');
-        document.getElementById('rdStars').innerHTML = stars + '<span class="stars-mock-label">(mock)</span>';
+        // Stars hidden until real activity scoring system is implemented
+        document.getElementById('rdStars').innerHTML = '';
 
         // Project history
         if (p.projects && p.projects.length > 0) {
@@ -1532,64 +1524,30 @@ function formatDate(dateString) {
 }
 
 // ========================================
-// CONTRIBUTION LEADERBOARD (mock)
+// CONTRIBUTION LEADERBOARD
 // ========================================
 
 let leaderboardPage = 1;
 const LEADERBOARD_PER_PAGE = 5;
 
-// Stable mock rating from sha — same formula as renderCommitRating
-function mockRatingFromSha(sha) {
-    return ((parseInt(String(sha).replace(/[^0-9]/g, '').slice(0, 4) || '0', 10) % 41) + 10) / 10;
-}
-
-// MOCK MODE — set to false to use real commit data
-const LEADERBOARD_MOCK_MODE = true;
-
 function computeLeaderboard() {
-    if (LEADERBOARD_MOCK_MODE) {
-        const fakes = [
-            { author: 'alice',     commits: 12, avg: 4.6 },
-            { author: 'bob',       commits: 9,  avg: 4.8 },
-            { author: 'charlie',   commits: 11, avg: 3.9 },
-            { author: 'diana',     commits: 7,  avg: 4.5 },
-            { author: 'eve',       commits: 8,  avg: 3.8 },
-            { author: 'frank',     commits: 5,  avg: 4.4 },
-            { author: 'grace',     commits: 6,  avg: 3.6 },
-            { author: 'henry',     commits: 4,  avg: 4.2 },
-            { author: 'isabella',  commits: 5,  avg: 3.4 },
-            { author: 'jack',      commits: 3,  avg: 4.5 },
-            { author: 'kate',      commits: 4,  avg: 3.2 },
-            { author: 'liam',      commits: 2,  avg: 4.8 },
-            { author: 'mia',       commits: 3,  avg: 3.0 },
-            { author: 'noah',      commits: 2,  avg: 3.5 },
-            { author: 'olivia',    commits: 1,  avg: 5.0 }
-        ];
-        return fakes.map(f => ({
-            author: f.author,
-            avatar: null,
-            commits: f.commits,
-            totalRating: f.commits * f.avg,
-            avgRating: f.avg,
-            score: f.commits * f.avg
-        })).sort((a, b) => b.score - a.score);
-    }
-
-    // Real: group commits by author
+    // Group commits by author. Only commits with a real rating contribute to the score.
     const byAuthor = {};
     (allCommits || []).forEach(c => {
         const author = c.author || 'Unknown';
         if (!byAuthor[author]) {
-            byAuthor[author] = { author, avatar: c.avatar || null, commits: 0, totalRating: 0 };
+            byAuthor[author] = { author, avatar: c.avatar || null, commits: 0, totalRating: 0, ratedCommits: 0 };
         }
         byAuthor[author].commits += 1;
-        const r = c.rating != null ? c.rating : mockRatingFromSha(c.sha || '');
-        byAuthor[author].totalRating += r;
+        if (c.rating != null) {
+            byAuthor[author].totalRating += c.rating;
+            byAuthor[author].ratedCommits += 1;
+        }
     });
 
     return Object.values(byAuthor).map(a => ({
         ...a,
-        avgRating: a.totalRating / a.commits,
+        avgRating: a.ratedCommits > 0 ? a.totalRating / a.ratedCommits : 0,
         score: a.totalRating
     })).sort((a, b) => b.score - a.score);
 }
@@ -1685,76 +1643,12 @@ let commitLoading = false;
 let allCommits = [];
 
 // Fetch commits for current page
-// MOCK MODE — set to false to use real GitHub commit data
-const COMMITS_MOCK_MODE = true;
-
-function getMockCommits() {
-    const now = Date.now();
-    const hAgo = (h) => new Date(now - h * 3600000).toISOString();
-    const authors = ['alice', 'bob', 'charlie', 'diana', 'eve', 'frank', 'grace', 'henry'];
-
-    const messages = [
-        ['Add JWT-based authentication middleware', 'Replaces session cookies for API endpoints. Includes refresh token rotation and rate limiting on /auth/refresh.'],
-        ['Fix race condition in kick vote resolver', 'Lazy resolve was firing twice when two members voted simultaneously.'],
-        ['Refactor project-detail.js into modules', 'Split chat, todos, members, and admin panel into separate files.'],
-        ['Add email verification flow', null],
-        ['Optimize commit history pagination', 'Use server-side cursor instead of offset to avoid full-table scans.'],
-        ['Update README with deployment instructions', null],
-        ['Fix dark mode contrast on Discover page', 'Tag chips and meta text were unreadable on dark surfaces.'],
-        ['Add notification bell badge animations', null],
-        ['Migrate sessions table to PostgreSQL store', 'Removes in-memory session loss on container restart.'],
-        ['Implement project-level chat with encryption', 'AES-256-GCM with per-project key derivation.'],
-        ['Add unit tests for auth middleware', 'Cover session validation, fingerprint check, and rate limiting.'],
-        ['Bump express to 4.21 and patch CVE-2024-XXXX', null],
-        ['Add Sentry error monitoring', 'Configured with release tagging from CI.'],
-        ['Improve mobile responsiveness for project cards', null],
-        ['Fix typo in onboarding modal', null],
-        ['Add Docker healthcheck endpoint', 'Returns 200 if DB is reachable, 503 otherwise.'],
-        ['Refactor join request notifications', 'Batch sends instead of one per recipient.'],
-        ['Add admin panel health metrics', 'Tracks pending requests, active kick votes, and stale members.'],
-        ['Update privacy policy and terms', null],
-        ['Implement contribution leaderboard UI', 'Mock data for now until commit voting backend is ready.'],
-        ['Add CSRF protection middleware', null],
-        ['Fix infinite loop in member pagination', 'Off-by-one in page total calculation.'],
-        ['Migrate from npm to pnpm', null],
-        ['Add database backup cron job', 'Daily at 03:00 UTC, retains 7 days of snapshots.'],
-        ['Improve error messages on signup form', null]
-    ];
-
-    return messages.slice(0, 25).map((m, i) => {
-        const author = authors[i % authors.length];
-        return {
-            sha: `mock${String(i).padStart(2, '0')}${Math.floor(Math.random() * 100000).toString(36)}`,
-            author,
-            avatar: null,
-            message: m[1] ? `${m[0]}\n\n${m[1]}` : m[0],
-            date: hAgo(i * 6 + Math.floor(Math.random() * 4)),
-            url: '#'
-        };
-    });
-}
-
 async function fetchCommits(page = 1) {
+    if (!project || !project.githubRepo) return;
+
     const section = document.getElementById('commitsSection');
     const container = document.getElementById('commitsContainer');
     const pagination = document.getElementById('commitsPagination');
-
-    if (COMMITS_MOCK_MODE) {
-        section.style.display = 'block';
-        const mocks = getMockCommits();
-        const PER_PAGE = 5;
-        const start = (page - 1) * PER_PAGE;
-        allCommits = mocks.slice(start, start + PER_PAGE);
-        commitPage = page;
-        commitHasNext = start + PER_PAGE < mocks.length;
-        commitLoading = false;
-        renderCommits();
-        renderLeaderboard();
-        return;
-    }
-
-    if (!project || !project.githubRepo) return;
-
     section.style.display = 'block';
 
     // First load: show placeholder; subsequent pages: dim existing content
@@ -1844,10 +1738,8 @@ function renderCommits() {
                 ? `<img class="commit-avatar" src="${commit.avatar}" alt="${commit.author}">`
                 : `<div class="commit-avatar-placeholder">${commit.author.charAt(0).toUpperCase()}</div>`;
 
-            // Mock effort rating (1.0 — 5.0). Stable per sha so it doesn't jitter on re-render.
-            const rating = commit.rating != null
-                ? commit.rating
-                : (((parseInt(commit.sha.replace(/[^0-9]/g, '').slice(0, 4) || '0', 10) % 41) + 10) / 10);
+            // Effort rating only shown when commit voting backend provides it
+            const ratingHTML = commit.rating != null ? renderCommitRating(commit.rating) : '';
             html += `
                 <div class="commit-item">
                     ${avatarHTML}
@@ -1862,7 +1754,7 @@ function renderCommits() {
                         </div>
                     </div>
                     <div class="commit-actions">
-                        ${renderCommitRating(rating)}
+                        ${ratingHTML}
                         <a class="commit-review-btn" href="${commit.url}" target="_blank" rel="noopener" title="Review this commit on GitHub">
                             <img src="../pictures/icons/github.svg" width="12" height="12" alt="">
                             <span>Review</span>
@@ -1891,7 +1783,7 @@ function renderCommits() {
     pagination.innerHTML = paginationHTML;
 }
 
-// Render 5-star effort rating (mock voting result for now)
+// Render 5-star effort rating (driven by commit voting backend)
 function renderCommitRating(value) {
     const v = Math.max(0, Math.min(5, Number(value) || 0));
     let stars = '';
