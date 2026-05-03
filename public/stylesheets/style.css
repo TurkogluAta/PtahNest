@@ -2934,15 +2934,20 @@ textarea.input-field {
     border-radius: 3px;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 900px) {
     .notif-panel {
         position: fixed;
-        top: auto;
+        top: 70px;
         right: 1rem;
         left: 1rem;
+        bottom: auto;
         width: auto;
-        bottom: 1rem;
-        max-height: 70vh;
+        max-width: 420px;
+        margin-left: auto;
+        max-height: calc(100vh - 90px);
+    }
+    .notif-panel-body {
+        max-height: calc(100vh - 160px);
     }
 }
 
@@ -3814,6 +3819,607 @@ textarea.input-field {
     font-size: 0.82rem;
     text-align: center;
     margin: auto;
+}
+
+/* ─── Contribution Leaderboard ─── */
+.mock-badge {
+    font-size: 0.6rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-3);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1rem 0.4rem;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+}
+
+.leaderboard-podium {
+    display: flex;
+    gap: 0.75rem;
+    align-items: end;
+    padding: 1rem 0.5rem 1.25rem;
+}
+
+.leaderboard-podium .podium-card {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Desktop: visual order is 2nd, 1st, 3rd (DOM stays 1-2-3 for mobile a11y) */
+.leaderboard-podium .podium-card-1 { order: 2; }
+.leaderboard-podium .podium-card-2 { order: 1; }
+.leaderboard-podium .podium-card-3 { order: 3; }
+
+.podium-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 1rem 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    text-align: center;
+    transition: transform 0.15s, border-color 0.15s;
+}
+
+.podium-card:hover {
+    transform: translateY(-2px);
+}
+
+.podium-card-1 {
+    padding-top: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-color: rgba(255, 215, 0, 0.5);
+    background: linear-gradient(180deg, rgba(255, 215, 0, 0.06), var(--surface));
+}
+
+.podium-card-2 {
+    padding-top: 1.1rem;
+    padding-bottom: 1.1rem;
+    border-color: rgba(192, 192, 192, 0.4);
+    background: linear-gradient(180deg, rgba(192, 192, 192, 0.05), var(--surface));
+}
+
+.podium-card-3 {
+    padding-top: 0.85rem;
+    padding-bottom: 0.85rem;
+    border-color: rgba(205, 127, 50, 0.4);
+    background: linear-gradient(180deg, rgba(205, 127, 50, 0.05), var(--surface));
+}
+
+.podium-medal {
+    font-size: 1.5rem;
+    line-height: 1;
+}
+
+.podium-card-1 .podium-medal { font-size: 2rem; }
+
+.podium-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: var(--bg-elevated);
+}
+
+.podium-card-1 .podium-avatar {
+    width: 60px;
+    height: 60px;
+}
+
+.podium-avatar-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-1);
+    font-weight: 600;
+    font-size: 1.1rem;
+    border: 1px solid var(--border);
+}
+
+.podium-name {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-1);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.podium-score {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.podium-card-1 .podium-score { font-size: 1.5rem; }
+
+.podium-score-unit {
+    font-size: 0.7rem;
+    font-weight: 400;
+    color: var(--text-3);
+    margin-left: 0.15rem;
+}
+
+.podium-stats {
+    display: flex;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    color: var(--text-3);
+}
+
+/* Rest table */
+.leaderboard-table {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border);
+    margin-top: 0.5rem;
+}
+
+.leaderboard-row {
+    display: grid;
+    grid-template-columns: 50px 1fr auto auto auto;
+    gap: 1rem;
+    align-items: center;
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+    transition: background 0.15s;
+}
+
+.leaderboard-row:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.leaderboard-rank {
+    color: var(--text-3);
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.leaderboard-author {
+    color: var(--text-1);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.leaderboard-stat {
+    color: var(--text-3);
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.leaderboard-score {
+    color: var(--primary);
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+@media (max-width: 600px) {
+    .leaderboard-podium {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 0.5rem;
+    }
+    .leaderboard-podium .podium-card-1,
+    .leaderboard-podium .podium-card-2,
+    .leaderboard-podium .podium-card-3 {
+        order: initial; /* DOM order: 1, 2, 3 */
+        padding: 0.85rem 0.5rem;
+    }
+    .leaderboard-row {
+        grid-template-columns: 40px 1fr auto;
+        gap: 0.5rem;
+    }
+    .leaderboard-row > .leaderboard-stat:not(.leaderboard-score) {
+        display: none;
+    }
+}
+
+/* ─── Todo Tab — minimal/compact ─── */
+.todo-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* Toolbar — flat, no card */
+.todo-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.25rem 0;
+    flex-wrap: wrap;
+}
+
+.todo-stats {
+    display: flex;
+    gap: 0.85rem;
+    align-items: center;
+    font-size: 0.78rem;
+    color: var(--text-3);
+}
+
+.todo-stat-chip strong {
+    color: var(--text-1);
+    font-weight: 600;
+    margin-right: 0.2rem;
+}
+
+.todo-stat-open strong { color: var(--primary); }
+.todo-stat-done strong { color: #4ade80; }
+
+.todo-toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Filter — text-style with active underline */
+.todo-filter-tabs {
+    display: flex;
+    gap: 0.1rem;
+}
+
+.todo-filter-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-3);
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 0.3rem 0.55rem;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: color 0.15s, background 0.15s;
+}
+
+.todo-filter-btn:hover {
+    color: var(--text-1);
+}
+
+.todo-filter-btn.active {
+    color: var(--primary);
+    background: rgba(102, 126, 234, 0.1);
+}
+
+/* List — borderless, dividers only */
+.todo-list {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border);
+}
+
+.todo-empty {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: var(--text-3);
+    font-size: 0.82rem;
+}
+
+.todo-item {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.5rem 0.25rem;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+}
+
+.todo-item:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.todo-item:hover .todo-item-actions {
+    opacity: 1;
+}
+
+.todo-item-done {
+    opacity: 0.5;
+}
+
+.todo-checkbox {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    border: 1.5px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: white;
+    font-size: 0.65rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.todo-checkbox:hover {
+    border-color: var(--primary);
+}
+
+.todo-checkbox-checked {
+    background: var(--primary);
+    border-color: var(--primary);
+}
+
+.todo-checkbox-disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+}
+
+.todo-checkbox-disabled:hover {
+    border-color: var(--border);
+}
+
+.todo-item-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    overflow: hidden;
+}
+
+.todo-item-title {
+    font-size: 0.85rem;
+    font-weight: 400;
+    color: var(--text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 1;
+    min-width: 0;
+}
+
+.todo-item-done .todo-item-title {
+    text-decoration: line-through;
+    color: var(--text-3);
+}
+
+.todo-item-desc {
+    display: none; /* hidden by default — too noisy in list view */
+}
+
+/* Inline meta — chips without borders */
+.todo-item-meta {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.todo-meta-chip {
+    font-size: 0.7rem;
+    color: var(--text-3);
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+}
+
+.todo-meta-overdue {
+    color: #f87171;
+}
+
+.todo-meta-author {
+    display: none; /* removed — clutter */
+}
+
+/* Actions — hover-only */
+.todo-item-actions {
+    display: flex;
+    gap: 0.05rem;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.todo-action-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-3);
+    font-size: 0.8rem;
+    cursor: pointer;
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    transition: color 0.15s, background 0.15s;
+}
+
+.todo-action-btn:hover {
+    color: var(--primary);
+    background: var(--bg-elevated);
+}
+
+.todo-action-delete:hover {
+    color: #f87171;
+    background: rgba(248, 113, 113, 0.08);
+}
+
+/* Pagination — compact */
+#todoPagination .health-pagination {
+    padding-top: 0.5rem;
+    border-top: none;
+}
+
+.todo-assign-hint {
+    font-size: 0.7rem;
+    margin-top: 0.3rem;
+    color: var(--text-3);
+    font-style: italic;
+}
+
+/* Date input — white calendar icon for dark theme */
+input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1) brightness(2);
+    cursor: pointer;
+    opacity: 0.8;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+}
+
+/* Modal */
+.todo-modal-content {
+    max-width: 500px;
+}
+
+.todo-form-row {
+    display: flex;
+    gap: 1rem;
+}
+
+.todo-form-row .input-group {
+    flex: 1;
+}
+
+.section-empty-message {
+    text-align: center;
+    padding: 1rem;
+    color: var(--text-3);
+}
+
+.section-empty-message-lg {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-3);
+}
+
+@media (max-width: 600px) {
+    .todo-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .todo-toolbar-right {
+        justify-content: space-between;
+    }
+    .todo-form-row {
+        flex-direction: column;
+        gap: 0;
+    }
+}
+
+/* ─── Team Tab (Todo summary + Chat combined) ─── */
+.team-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.team-todo-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem 0.875rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.team-todo-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.team-todo-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-1);
+    flex-wrap: wrap;
+}
+
+.team-todo-icon {
+    width: 18px;
+    height: 18px;
+    opacity: 0.9;
+    flex-shrink: 0;
+}
+
+.team-todo-stats {
+    display: inline-flex;
+    gap: 0.4rem;
+    margin-left: 0.4rem;
+    font-weight: 400;
+}
+
+.team-todo-header-actions {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.team-todo-filter {
+    padding: 0.25rem 0;
+}
+
+.todo-show-more {
+    width: 100%;
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text-3);
+    font-size: 0.78rem;
+    padding: 0.4rem;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-top: 0.25rem;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.todo-show-more:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+}
+
+.team-chat-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    height: 500px;
+}
+
+.team-chat-panel .project-chat-messages {
+    flex: 1;
+    background: transparent;
+    border: none;
+    padding: 0.25rem;
+}
+
+/* Legacy — kept for backwards compat */
+.project-chat-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    height: 500px;
+}
+
+.project-chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 1rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
 }
 
 .request-chat-input-row {

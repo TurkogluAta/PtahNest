@@ -12,6 +12,13 @@ let project = null;
 let members = [];
 let currentUserId = null;
 let currentUserRole = null; // 'creator' | 'moderator' | 'member'
+let projectChatPolling = null;
+let todos = [];
+let todoFilter = 'all'; // 'all' | 'open' | 'done'
+let todoPage = 1;
+const TODOS_PER_PAGE = 5;
+let todoExpanded = false; // collapsed: preview (top 3 open) ; expanded: full list+filter+pagination
+const TODO_PREVIEW_COUNT = 3;
 
 // Fetch project details
 async function fetchProjectDetails() {
@@ -66,6 +73,7 @@ async function fetchMembers() {
             renderActions();
             initTabBar();
             loadKickVotes(); // active votes visible to all members
+            renderLeaderboard(); // mock leaderboard, fallback data if no commits yet
         } else {
             // User not authorized to view members
             const data = await response.json();
@@ -240,20 +248,43 @@ function changeTeamMembersPage(page) {
 
 function initTabBar() {
     const isManagement = currentUserRole === 'creator' || currentUserRole === 'moderator';
-    if (isManagement && project.status === 'active') {
+    const isMember = !!currentUserRole; // any active role
+
+    if (isMember && project.status === 'active') {
         document.getElementById('tabBar').style.display = 'block';
-        loadAdminPanel();
-        // Switch to tab specified in URL param (e.g. ?tab=admin from notification)
+
+        if (isManagement) {
+            document.getElementById('adminTab').style.display = '';
+            loadAdminPanel();
+        }
+
+        // Switch to tab specified in URL param
         const tabParam = urlParams.get('tab');
-        if (tabParam === 'admin') switchDetailTab('admin');
+        if (tabParam === 'admin' && isManagement) switchDetailTab('admin');
+        else if (tabParam === 'team' || tabParam === 'chat' || tabParam === 'todo') switchDetailTab('team');
     }
 }
 
 function switchDetailTab(tab) {
+    // Stop chat polling when leaving team tab
+    if (tab !== 'team' && projectChatPolling) {
+        clearInterval(projectChatPolling);
+        projectChatPolling = null;
+    }
+
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     document.getElementById(tab + 'Tab').classList.add('active');
     document.getElementById(tab + 'Content').classList.add('active');
+
+    // Load chat + todos when entering team tab
+    if (tab === 'team') {
+        fetchProjectMessages();
+        fetchTodos();
+        if (!projectChatPolling) {
+            projectChatPolling = setInterval(fetchProjectMessages, 3000);
+        }
+    }
 }
 
 // ========================================
@@ -663,14 +694,8 @@ function changePastKicksPage(page) {
 }
 
 // Overview-side active votes (read-only for non-admin, no Start button)
+// Pinned at the top of Overview when present — no collapse
 let overviewActiveKicksPage = 1;
-let overviewActiveKicksOpen = false;
-
-function toggleOverviewActiveKicks() {
-    overviewActiveKicksOpen = !overviewActiveKicksOpen;
-    document.getElementById('overviewActiveKicksPanel').classList.toggle('open', overviewActiveKicksOpen);
-    document.getElementById('overviewActiveKicksChevron').classList.toggle('rotated', overviewActiveKicksOpen);
-}
 
 function renderOverviewActiveKicks() {
     const container = document.getElementById('activeVotesContainer');
@@ -1507,28 +1532,229 @@ function formatDate(dateString) {
 }
 
 // ========================================
-// COMMIT HISTORY
+// CONTRIBUTION LEADERBOARD (mock)
 // ========================================
-let commitsOpen = false;
 
-function toggleCommits() {
-    commitsOpen = !commitsOpen;
-    document.getElementById('commitsPanel').classList.toggle('open', commitsOpen);
-    document.getElementById('commitsChevron').classList.toggle('rotated', commitsOpen);
+let leaderboardPage = 1;
+const LEADERBOARD_PER_PAGE = 5;
+
+// Stable mock rating from sha — same formula as renderCommitRating
+function mockRatingFromSha(sha) {
+    return ((parseInt(String(sha).replace(/[^0-9]/g, '').slice(0, 4) || '0', 10) % 41) + 10) / 10;
 }
 
+// MOCK MODE — set to false to use real commit data
+const LEADERBOARD_MOCK_MODE = true;
+
+function computeLeaderboard() {
+    if (LEADERBOARD_MOCK_MODE) {
+        const fakes = [
+            { author: 'alice',     commits: 12, avg: 4.6 },
+            { author: 'bob',       commits: 9,  avg: 4.8 },
+            { author: 'charlie',   commits: 11, avg: 3.9 },
+            { author: 'diana',     commits: 7,  avg: 4.5 },
+            { author: 'eve',       commits: 8,  avg: 3.8 },
+            { author: 'frank',     commits: 5,  avg: 4.4 },
+            { author: 'grace',     commits: 6,  avg: 3.6 },
+            { author: 'henry',     commits: 4,  avg: 4.2 },
+            { author: 'isabella',  commits: 5,  avg: 3.4 },
+            { author: 'jack',      commits: 3,  avg: 4.5 },
+            { author: 'kate',      commits: 4,  avg: 3.2 },
+            { author: 'liam',      commits: 2,  avg: 4.8 },
+            { author: 'mia',       commits: 3,  avg: 3.0 },
+            { author: 'noah',      commits: 2,  avg: 3.5 },
+            { author: 'olivia',    commits: 1,  avg: 5.0 }
+        ];
+        return fakes.map(f => ({
+            author: f.author,
+            avatar: null,
+            commits: f.commits,
+            totalRating: f.commits * f.avg,
+            avgRating: f.avg,
+            score: f.commits * f.avg
+        })).sort((a, b) => b.score - a.score);
+    }
+
+    // Real: group commits by author
+    const byAuthor = {};
+    (allCommits || []).forEach(c => {
+        const author = c.author || 'Unknown';
+        if (!byAuthor[author]) {
+            byAuthor[author] = { author, avatar: c.avatar || null, commits: 0, totalRating: 0 };
+        }
+        byAuthor[author].commits += 1;
+        const r = c.rating != null ? c.rating : mockRatingFromSha(c.sha || '');
+        byAuthor[author].totalRating += r;
+    });
+
+    return Object.values(byAuthor).map(a => ({
+        ...a,
+        avgRating: a.totalRating / a.commits,
+        score: a.totalRating
+    })).sort((a, b) => b.score - a.score);
+}
+
+function renderLeaderboard() {
+    const container = document.getElementById('leaderboardContainer');
+    if (!container) return;
+
+    const entries = computeLeaderboard();
+    if (entries.length === 0) {
+        container.innerHTML = '<p class="text-muted section-empty-message">No data yet.</p>';
+        return;
+    }
+
+    const top3 = entries.slice(0, 3);
+    const rest = entries.slice(3);
+
+    // DOM order: always 1-2-3 (so mobile single column shows 1st on top).
+    // Desktop CSS uses `order` to display them as 2-1-3.
+    const podiumOrder = [];
+    if (top3[0]) podiumOrder.push({ entry: top3[0], place: 1 });
+    if (top3[1]) podiumOrder.push({ entry: top3[1], place: 2 });
+    if (top3[2]) podiumOrder.push({ entry: top3[2], place: 3 });
+
+    const medal = (p) => p === 1 ? '🥇' : p === 2 ? '🥈' : '🥉';
+
+    const podiumHTML = `
+        <div class="leaderboard-podium">
+            ${podiumOrder.map(({ entry, place }) => {
+                const avatar = entry.avatar
+                    ? `<img class="podium-avatar" src="${entry.avatar}" alt="${escapeHtml(entry.author)}">`
+                    : `<div class="podium-avatar podium-avatar-placeholder">${escapeHtml(entry.author.charAt(0).toUpperCase())}</div>`;
+                return `
+                    <div class="podium-card podium-card-${place}">
+                        <div class="podium-medal">${medal(place)}</div>
+                        ${avatar}
+                        <div class="podium-name">${escapeHtml(entry.author)}</div>
+                        <div class="podium-score">${entry.score.toFixed(1)} <span class="podium-score-unit">pts</span></div>
+                        <div class="podium-stats">
+                            <span>${entry.commits} commit${entry.commits === 1 ? '' : 's'}</span>
+                            <span>·</span>
+                            <span>avg ${entry.avgRating.toFixed(1)}★</span>
+                        </div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+
+    // Rest table with pagination
+    let tableHTML = '';
+    if (rest.length > 0) {
+        const totalPages = Math.max(1, Math.ceil(rest.length / LEADERBOARD_PER_PAGE));
+        if (leaderboardPage > totalPages) leaderboardPage = totalPages;
+        const start = (leaderboardPage - 1) * LEADERBOARD_PER_PAGE;
+        const pageRows = rest.slice(start, start + LEADERBOARD_PER_PAGE);
+
+        const rows = pageRows.map((entry, i) => `
+            <div class="leaderboard-row">
+                <div class="leaderboard-rank">#${start + i + 4}</div>
+                <div class="leaderboard-author">${escapeHtml(entry.author)}</div>
+                <div class="leaderboard-stat leaderboard-score">${entry.score.toFixed(1)} pts</div>
+                <div class="leaderboard-stat">${entry.commits} commit${entry.commits === 1 ? '' : 's'}</div>
+                <div class="leaderboard-stat">avg ${entry.avgRating.toFixed(1)}★</div>
+            </div>
+        `).join('');
+
+        const pagination = totalPages > 1 ? `
+            <div class="health-pagination">
+                <button class="health-page-btn" onclick="changeLeaderboardPage(${leaderboardPage - 1})" ${leaderboardPage === 1 ? 'disabled' : ''}>←</button>
+                <span class="health-page-info">${leaderboardPage}/${totalPages} <span class="health-page-count">(${rest.length} more)</span></span>
+                <button class="health-page-btn" onclick="changeLeaderboardPage(${leaderboardPage + 1})" ${leaderboardPage === totalPages ? 'disabled' : ''}>→</button>
+            </div>
+        ` : '';
+
+        tableHTML = `<div class="leaderboard-table">${rows}</div>${pagination}`;
+    }
+
+    container.innerHTML = podiumHTML + tableHTML;
+}
+
+function changeLeaderboardPage(page) {
+    leaderboardPage = page;
+    renderLeaderboard();
+}
+
+// ========================================
+// COMMIT HISTORY
+// ========================================
 let commitPage = 1;
 let commitHasNext = false;
 let commitLoading = false;
 let allCommits = [];
 
 // Fetch commits for current page
-async function fetchCommits(page = 1) {
-    if (!project || !project.githubRepo) return;
+// MOCK MODE — set to false to use real GitHub commit data
+const COMMITS_MOCK_MODE = true;
 
+function getMockCommits() {
+    const now = Date.now();
+    const hAgo = (h) => new Date(now - h * 3600000).toISOString();
+    const authors = ['alice', 'bob', 'charlie', 'diana', 'eve', 'frank', 'grace', 'henry'];
+
+    const messages = [
+        ['Add JWT-based authentication middleware', 'Replaces session cookies for API endpoints. Includes refresh token rotation and rate limiting on /auth/refresh.'],
+        ['Fix race condition in kick vote resolver', 'Lazy resolve was firing twice when two members voted simultaneously.'],
+        ['Refactor project-detail.js into modules', 'Split chat, todos, members, and admin panel into separate files.'],
+        ['Add email verification flow', null],
+        ['Optimize commit history pagination', 'Use server-side cursor instead of offset to avoid full-table scans.'],
+        ['Update README with deployment instructions', null],
+        ['Fix dark mode contrast on Discover page', 'Tag chips and meta text were unreadable on dark surfaces.'],
+        ['Add notification bell badge animations', null],
+        ['Migrate sessions table to PostgreSQL store', 'Removes in-memory session loss on container restart.'],
+        ['Implement project-level chat with encryption', 'AES-256-GCM with per-project key derivation.'],
+        ['Add unit tests for auth middleware', 'Cover session validation, fingerprint check, and rate limiting.'],
+        ['Bump express to 4.21 and patch CVE-2024-XXXX', null],
+        ['Add Sentry error monitoring', 'Configured with release tagging from CI.'],
+        ['Improve mobile responsiveness for project cards', null],
+        ['Fix typo in onboarding modal', null],
+        ['Add Docker healthcheck endpoint', 'Returns 200 if DB is reachable, 503 otherwise.'],
+        ['Refactor join request notifications', 'Batch sends instead of one per recipient.'],
+        ['Add admin panel health metrics', 'Tracks pending requests, active kick votes, and stale members.'],
+        ['Update privacy policy and terms', null],
+        ['Implement contribution leaderboard UI', 'Mock data for now until commit voting backend is ready.'],
+        ['Add CSRF protection middleware', null],
+        ['Fix infinite loop in member pagination', 'Off-by-one in page total calculation.'],
+        ['Migrate from npm to pnpm', null],
+        ['Add database backup cron job', 'Daily at 03:00 UTC, retains 7 days of snapshots.'],
+        ['Improve error messages on signup form', null]
+    ];
+
+    return messages.slice(0, 25).map((m, i) => {
+        const author = authors[i % authors.length];
+        return {
+            sha: `mock${String(i).padStart(2, '0')}${Math.floor(Math.random() * 100000).toString(36)}`,
+            author,
+            avatar: null,
+            message: m[1] ? `${m[0]}\n\n${m[1]}` : m[0],
+            date: hAgo(i * 6 + Math.floor(Math.random() * 4)),
+            url: '#'
+        };
+    });
+}
+
+async function fetchCommits(page = 1) {
     const section = document.getElementById('commitsSection');
     const container = document.getElementById('commitsContainer');
     const pagination = document.getElementById('commitsPagination');
+
+    if (COMMITS_MOCK_MODE) {
+        section.style.display = 'block';
+        const mocks = getMockCommits();
+        const PER_PAGE = 5;
+        const start = (page - 1) * PER_PAGE;
+        allCommits = mocks.slice(start, start + PER_PAGE);
+        commitPage = page;
+        commitHasNext = start + PER_PAGE < mocks.length;
+        commitLoading = false;
+        renderCommits();
+        renderLeaderboard();
+        return;
+    }
+
+    if (!project || !project.githubRepo) return;
+
     section.style.display = 'block';
 
     // First load: show placeholder; subsequent pages: dim existing content
@@ -1571,6 +1797,7 @@ async function fetchCommits(page = 1) {
         commitLoading = false;
 
         renderCommits();
+        renderLeaderboard(); // refresh leaderboard with real commit data
     } catch (error) {
         container.style.opacity = '';
         container.style.pointerEvents = '';
@@ -1716,6 +1943,338 @@ function formatCommitDate(dateString) {
     if (hours < 24) return `${hours}h ago`;
     if (hours < 48) return 'yesterday';
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+// ========================================
+// PROJECT TODOS
+// ========================================
+
+async function fetchTodos() {
+    try {
+        const res = await fetch(`/api/projects/${projectId}/todos`);
+        const data = await res.json();
+        if (!data.success) return;
+        todos = data.todos;
+        renderTodos();
+    } catch (err) {
+        console.error('Fetch todos error:', err);
+    }
+}
+
+function populateTodoAssignSelect() {
+    const sel = document.getElementById('todoAssignSelect');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Unassigned</option>';
+    members.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.user_id;
+        opt.textContent = m.username + (m.role !== 'member' ? ` (${m.role})` : '');
+        sel.appendChild(opt);
+    });
+}
+
+function setTodoFilter(filter) {
+    todoFilter = filter;
+    todoPage = 1;
+    document.querySelectorAll('.todo-filter-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.filter === filter);
+    });
+    renderTodos();
+}
+
+function changeTodoPage(page) {
+    todoPage = page;
+    renderTodos();
+}
+
+function getFilteredTodos() {
+    if (todoFilter === 'open') return todos.filter(t => !t.completed);
+    if (todoFilter === 'done') return todos.filter(t => t.completed);
+    return todos;
+}
+
+function updateTodoStats() {
+    const total = todos.length;
+    const done = todos.filter(t => t.completed).length;
+    const open = total - done;
+    const totalEl = document.getElementById('todoCountTotal');
+    const openEl = document.getElementById('todoCountOpen');
+    const doneEl = document.getElementById('todoCountDone');
+    if (totalEl) totalEl.textContent = total;
+    if (openEl) openEl.textContent = open;
+    if (doneEl) doneEl.textContent = done;
+}
+
+function toggleTodoExpand() {
+    todoExpanded = !todoExpanded;
+    const filterEl = document.getElementById('teamTodoFilter');
+    const btn = document.getElementById('todoExpandBtn');
+    if (filterEl) filterEl.style.display = todoExpanded ? '' : 'none';
+    if (btn) btn.textContent = todoExpanded ? 'Show less' : 'Show all';
+    // Reset filter/page on collapse
+    if (!todoExpanded) {
+        todoFilter = 'all';
+        todoPage = 1;
+        document.querySelectorAll('.todo-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
+    }
+    renderTodos();
+}
+
+function renderTodos() {
+    const container = document.getElementById('todoList');
+    const paginationEl = document.getElementById('todoPagination');
+    if (!container) return;
+
+    updateTodoStats();
+
+    const isManagement = currentUserRole === 'creator' || currentUserRole === 'moderator';
+
+    // Collapsed mode: show first N open todos as preview, no pagination/filter
+    let displayTodos;
+    let totalPages = 1;
+    let filteredCount = 0;
+    if (todoExpanded) {
+        const filtered = getFilteredTodos();
+        filteredCount = filtered.length;
+        if (filtered.length === 0) {
+            const msg = todos.length === 0 ? 'No todos yet. Click "+ New" to add one.' : `No ${todoFilter} todos.`;
+            container.innerHTML = `<div class="todo-empty">${msg}</div>`;
+            if (paginationEl) paginationEl.innerHTML = '';
+            return;
+        }
+        totalPages = Math.max(1, Math.ceil(filtered.length / TODOS_PER_PAGE));
+        if (todoPage > totalPages) todoPage = totalPages;
+        const start = (todoPage - 1) * TODOS_PER_PAGE;
+        displayTodos = filtered.slice(start, start + TODOS_PER_PAGE);
+    } else {
+        // Preview: open todos first, then done — show only top N
+        const openTodos = todos.filter(t => !t.completed);
+        const doneTodos = todos.filter(t => t.completed);
+        const ordered = [...openTodos, ...doneTodos];
+        if (ordered.length === 0) {
+            container.innerHTML = '<div class="todo-empty">No todos yet. Click "+ New" to add one.</div>';
+            if (paginationEl) paginationEl.innerHTML = '';
+            return;
+        }
+        displayTodos = ordered.slice(0, TODO_PREVIEW_COUNT);
+    }
+
+    const pageTodos = displayTodos;
+    const start = todoExpanded ? (todoPage - 1) * TODOS_PER_PAGE : 0;
+
+    container.innerHTML = pageTodos.map(t => {
+        const dueDateStr = t.due_date ? new Date(t.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+        const isOverdue = t.due_date && !t.completed && new Date(t.due_date) < new Date();
+        const isAuthor = t.created_by === currentUserId;
+        const isAssignee = t.assigned_to === currentUserId;
+        const canModify = isManagement || isAuthor; // edit/delete
+        const canToggle = isManagement || isAuthor || isAssignee; // toggle complete
+        const titleAttr = t.description ? ` title="${escapeHtml(t.description)}"` : '';
+        const toggleDisabled = !canToggle;
+        const checkboxTitle = toggleDisabled ? 'Only creator/moderator, todo author, or assignee can toggle' : 'Toggle complete';
+        return `
+          <div class="todo-item ${t.completed ? 'todo-item-done' : ''}">
+            <button class="todo-checkbox ${t.completed ? 'todo-checkbox-checked' : ''} ${toggleDisabled ? 'todo-checkbox-disabled' : ''}"
+                    ${toggleDisabled ? 'disabled' : `onclick="toggleTodo('${t.id}')"`}
+                    title="${checkboxTitle}">
+                ${t.completed ? '✓' : ''}
+            </button>
+            <div class="todo-item-body">
+              <span class="todo-item-title"${titleAttr}>${escapeHtml(t.title)}</span>
+              <div class="todo-item-meta">
+                ${t.assigned_to_username ? `<span class="todo-meta-chip">@${escapeHtml(t.assigned_to_username)}</span>` : ''}
+                ${dueDateStr ? `<span class="todo-meta-chip ${isOverdue ? 'todo-meta-overdue' : ''}">${dueDateStr}</span>` : ''}
+              </div>
+            </div>
+            ${canModify ? `
+              <div class="todo-item-actions">
+                <button class="todo-action-btn" onclick="openEditTodoModal('${t.id}')" title="Edit">✎</button>
+                <button class="todo-action-btn todo-action-delete" onclick="deleteTodo('${t.id}')" title="Delete">✕</button>
+              </div>
+            ` : ''}
+          </div>`;
+    }).join('');
+
+    if (paginationEl) {
+        if (todoExpanded && totalPages > 1) {
+            paginationEl.innerHTML = `
+                <div class="health-pagination">
+                    <button class="health-page-btn" onclick="changeTodoPage(${todoPage - 1})" ${todoPage === 1 ? 'disabled' : ''}>←</button>
+                    <span class="health-page-info">${todoPage}/${totalPages} <span class="health-page-count">(${filteredCount} todo${filteredCount === 1 ? '' : 's'})</span></span>
+                    <button class="health-page-btn" onclick="changeTodoPage(${todoPage + 1})" ${todoPage === totalPages ? 'disabled' : ''}>→</button>
+                </div>
+            `;
+        } else if (!todoExpanded && todos.length > TODO_PREVIEW_COUNT) {
+            const more = todos.length - TODO_PREVIEW_COUNT;
+            paginationEl.innerHTML = `<button class="todo-show-more" onclick="toggleTodoExpand()">+${more} more</button>`;
+        } else {
+            paginationEl.innerHTML = '';
+        }
+    }
+}
+
+function configureAssignField() {
+    // Show/hide Assign To based on management role
+    const isManagement = currentUserRole === 'creator' || currentUserRole === 'moderator';
+    const select = document.getElementById('todoAssignSelect');
+    const hint = document.getElementById('todoAssignHint');
+    if (isManagement) {
+        select.disabled = false;
+        if (hint) hint.style.display = 'none';
+    } else {
+        select.disabled = true;
+        select.value = '';
+        if (hint) hint.style.display = 'block';
+    }
+}
+
+function openTodoModal() {
+    populateTodoAssignSelect();
+    configureAssignField();
+    document.getElementById('todoEditId').value = '';
+    document.getElementById('todoModalTitle').textContent = 'New Todo';
+    document.getElementById('todoSubmitBtn').textContent = 'Create Todo';
+    document.getElementById('todoTitleInput').value = '';
+    document.getElementById('todoDescInput').value = '';
+    document.getElementById('todoDueInput').value = '';
+    document.getElementById('todoAssignSelect').value = '';
+    document.getElementById('todoModal').style.display = 'flex';
+    setTimeout(() => document.getElementById('todoTitleInput').focus(), 50);
+}
+
+function openEditTodoModal(todoId) {
+    const todo = todos.find(t => t.id === todoId);
+    if (!todo) return;
+
+    populateTodoAssignSelect();
+    configureAssignField();
+    document.getElementById('todoEditId').value = todo.id;
+    document.getElementById('todoModalTitle').textContent = 'Edit Todo';
+    document.getElementById('todoSubmitBtn').textContent = 'Save Changes';
+    document.getElementById('todoTitleInput').value = todo.title;
+    document.getElementById('todoDescInput').value = todo.description || '';
+    document.getElementById('todoDueInput').value = todo.due_date ? todo.due_date.split('T')[0] : '';
+    document.getElementById('todoAssignSelect').value = todo.assigned_to || '';
+    document.getElementById('todoModal').style.display = 'flex';
+    setTimeout(() => document.getElementById('todoTitleInput').focus(), 50);
+}
+
+function closeTodoModal() {
+    document.getElementById('todoModal').style.display = 'none';
+}
+
+async function submitTodo() {
+    const editId = document.getElementById('todoEditId').value;
+    const title = document.getElementById('todoTitleInput').value.trim();
+    if (!title) { showToast('Title is required', 'error'); return; }
+
+    const body = {
+        title,
+        description: document.getElementById('todoDescInput').value.trim() || null,
+        dueDate: document.getElementById('todoDueInput').value || null,
+        assignedTo: document.getElementById('todoAssignSelect').value || null
+    };
+
+    const url = editId
+        ? `/api/projects/${projectId}/todos/${editId}`
+        : `/api/projects/${projectId}/todos`;
+    const method = editId ? 'PUT' : 'POST';
+
+    try {
+        const res = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!data.success) { showToast(data.message || 'Failed to save todo', 'error'); return; }
+
+        closeTodoModal();
+        showToast(editId ? 'Todo updated' : 'Todo added', 'success');
+        fetchTodos();
+    } catch (err) {
+        console.error('Submit todo error:', err);
+        showToast('Failed to save todo', 'error');
+    }
+}
+
+async function toggleTodo(todoId) {
+    try {
+        await fetch(`/api/projects/${projectId}/todos/${todoId}`, { method: 'PATCH' });
+        fetchTodos();
+    } catch (err) {
+        console.error('Toggle todo error:', err);
+    }
+}
+
+async function deleteTodo(todoId) {
+    try {
+        const res = await fetch(`/api/projects/${projectId}/todos/${todoId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!data.success) { showToast(data.message || 'Failed to delete', 'error'); return; }
+        showToast('Todo deleted', 'success');
+        fetchTodos();
+    } catch (err) {
+        console.error('Delete todo error:', err);
+    }
+}
+
+// ========================================
+// PROJECT CHAT
+// ========================================
+
+async function fetchProjectMessages() {
+    try {
+        const res = await fetch(`/api/projects/${projectId}/messages`);
+        const data = await res.json();
+        if (!data.success) return;
+        renderProjectMessages(data.messages);
+    } catch (err) {
+        console.error('Fetch project messages error:', err);
+    }
+}
+
+function renderProjectMessages(messages) {
+    const container = document.getElementById('projectChatMessages');
+    if (!container) return;
+    const atBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 40;
+
+    if (messages.length === 0) {
+        container.innerHTML = '<p class="text-muted section-empty-message-lg">No messages yet. Say hello!</p>';
+        return;
+    }
+
+    container.innerHTML = messages.map(m => {
+        const isSelf = m.sender_id === currentUserId;
+        let roleLabel = '';
+        if (m.sender_role === 'creator') roleLabel = ' <span class="chat-sender-role">Creator</span>';
+        else if (m.sender_role === 'moderator') roleLabel = ' <span class="chat-sender-role">Mod</span>';
+        return `
+          <div class="chat-message ${isSelf ? 'chat-message-self' : 'chat-message-other'}">
+            <div class="chat-message-sender">${escapeHtml(m.sender_username)}${roleLabel}</div>
+            <div>${escapeHtml(m.content)}</div>
+            <div class="chat-message-time">${formatDate(m.created_at)}</div>
+          </div>`;
+    }).join('');
+
+    if (atBottom) container.scrollTop = container.scrollHeight;
+}
+
+async function sendProjectMessage() {
+    const input = document.getElementById('projectChatInput');
+    const content = input.value.trim();
+    if (!content) return;
+    input.value = '';
+    try {
+        await fetch(`/api/projects/${projectId}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+        fetchProjectMessages();
+    } catch (err) {
+        console.error('Send project message error:', err);
+    }
 }
 
 // Initialize on page load, then reveal content

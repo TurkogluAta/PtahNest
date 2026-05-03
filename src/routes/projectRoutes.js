@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { projectDb, userDb, memberDb, joinRequestDb, joinRequestMessageDb, githubDb, kickVoteDb, healthReadDb, notificationDb, pool } = require('../models/database');
+const { projectDb, userDb, memberDb, joinRequestDb, joinRequestMessageDb, projectMessageDb, projectTodoDb, githubDb, kickVoteDb, healthReadDb, notificationDb, pool } = require('../models/database');
 const { encrypt, decrypt } = require('../utils/encryption');
 const { sendCollaboratorInvite, createGithubRepo, removeGithubCollaborator, resolveGithubUsername } = require('./githubRoutes');
 const {
@@ -17,7 +17,9 @@ const {
   ballotValidation,
   messageContentValidation,
   paramUserIdValidation,
-  healthReadValidation
+  healthReadValidation,
+  createTodoValidation,
+  paramTodoIdValidation
 } = require('../middleware/validators');
 
 // Middleware: Check if user is authenticated
@@ -443,6 +445,13 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
       }
     }
 
+    // Bypass prevention: collect all user_ids that share this user's github_id
+    // (if any). Past restrictions on those accounts apply to this one too.
+    const linkedUserIds = snapshotGithubId
+      ? await userDb.findUserIdsByGithubId(snapshotGithubId)
+      : [];
+    const allUserIds = Array.from(new Set([userId, ...linkedUserIds]));
+
     // Check if user is already a member
     if (await memberDb.isMember(projectId, userId)) {
       return res.status(400).json({
@@ -451,10 +460,12 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
       });
     }
 
-    // Check if user has left or been kicked
+    // Check if any linked account has left or been kicked from this project
     const { rows: pastRows } = await pool.query(
-      `SELECT membership_status, left_at FROM project_members WHERE project_id = $1 AND user_id = $2 AND membership_status IN ('left', 'kicked')`,
-      [projectId, userId]
+      `SELECT membership_status, left_at FROM project_members
+       WHERE project_id = $1 AND user_id = ANY($2::text[]) AND membership_status IN ('left', 'kicked')
+       ORDER BY left_at DESC LIMIT 1`,
+      [projectId, allUserIds]
     );
     const pastMembership = pastRows[0] || null;
 
@@ -477,16 +488,21 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
       }
     }
 
-    // Check if user already has a pending request
-    if (await joinRequestDb.hasPendingRequest(projectId, userId)) {
+    // Check if any linked account has a pending request
+    const { rows: pendingRows } = await pool.query(
+      `SELECT id FROM join_requests
+       WHERE project_id = $1 AND user_id = ANY($2::text[]) AND status = 'pending' LIMIT 1`,
+      [projectId, allUserIds]
+    );
+    if (pendingRows.length > 0) {
       return res.status(400).json({
         success: false,
         message: 'You already have a pending request for this project'
       });
     }
 
-    // Check if user was recently rejected (within 30 days)
-    const rejectionCheck = await joinRequestDb.wasRecentlyRejected(projectId, userId);
+    // Check if any linked account was recently rejected (within 30 days)
+    const rejectionCheck = await joinRequestDb.wasRecentlyRejected(projectId, allUserIds);
     if (rejectionCheck.blocked) {
       return res.status(400).json({
         success: false,
@@ -496,8 +512,8 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
 
     // If there's an old rejected request (>30 days), delete it before creating new one
     await pool.query(
-      `DELETE FROM join_requests WHERE project_id = $1 AND user_id = $2 AND status = 'rejected'`,
-      [projectId, userId]
+      `DELETE FROM join_requests WHERE project_id = $1 AND user_id = ANY($2::text[]) AND status = 'rejected'`,
+      [projectId, allUserIds]
     );
 
     // Create join request (snapshot github_id for software projects)
@@ -1027,6 +1043,54 @@ router.get('/:id/requests/:requestId/messages', requireAuth, paramIdValidation, 
 });
 
 // ========================================
+// PROJECT CHAT
+// ========================================
+
+// Middleware: allow active project members only (creator/mod/member)
+async function requireActiveMember(req, res, next) {
+  try {
+    const project = await projectDb.findById(req.params.id, req.session.userId);
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+    if (!project.role) return res.status(403).json({ success: false, message: 'Members only' });
+    next();
+  } catch (err) {
+    console.error('requireActiveMember error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+}
+
+// POST: Send a project chat message
+router.post('/:id/messages', requireAuth, paramIdValidation, messageContentValidation, requireActiveMember, async (req, res) => {
+  try {
+    const encrypted = encrypt(req.body.content);
+    await projectMessageDb.create(req.params.id, req.session.userId, encrypted);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Send project message error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET: Fetch project chat messages
+router.get('/:id/messages', requireAuth, paramIdValidation, requireActiveMember, async (req, res) => {
+  try {
+    const rows = await projectMessageDb.getByProjectId(req.params.id);
+    const messages = rows.map(m => ({
+      id: m.id,
+      sender_id: m.sender_id,
+      sender_username: m.sender_username,
+      sender_role: m.sender_role || null,
+      content: decrypt(m.encrypted_content),
+      created_at: m.created_at
+    }));
+    res.json({ success: true, messages });
+  } catch (error) {
+    console.error('Get project messages error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ========================================
 // PUBLIC USER PROFILE
 // ========================================
 
@@ -1158,6 +1222,116 @@ router.delete('/:id/health-reads/:issueKey', requireAuth, paramIdValidation, req
     res.json({ success: true });
   } catch (err) {
     console.error('Health reads DELETE error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ========================================
+// PROJECT TODOS
+// ========================================
+
+// GET: List all todos for a project (active members only)
+router.get('/:id/todos', requireAuth, paramIdValidation, requireActiveMember, async (req, res) => {
+  try {
+    const todos = await projectTodoDb.getByProjectId(req.params.id);
+    res.json({ success: true, todos });
+  } catch (err) {
+    console.error('Get todos error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Helper: check if user is creator/moderator of a project
+async function isManagementOf(projectId, userId) {
+  const project = await projectDb.findById(projectId, userId);
+  return project && (project.role === 'creator' || project.role === 'moderator');
+}
+
+// POST: Create a todo (any active member; assignedTo restricted to mgmt only)
+router.post('/:id/todos', requireAuth, paramIdValidation, createTodoValidation, requireActiveMember, async (req, res) => {
+  try {
+    const { title, description, dueDate, assignedTo } = req.body;
+
+    // Only creator/moderator can assign todos to a user
+    if (assignedTo) {
+      const isMgmt = await isManagementOf(req.params.id, req.session.userId);
+      if (!isMgmt) {
+        return res.status(403).json({ success: false, message: 'Only creator or moderator can assign todos' });
+      }
+    }
+
+    const id = await projectTodoDb.create(req.params.id, req.session.userId, { title, description, dueDate, assignedTo });
+    res.status(201).json({ success: true, id });
+  } catch (err) {
+    console.error('Create todo error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// PATCH: Toggle todo complete/incomplete (creator/mod, author, or assignee)
+router.patch('/:id/todos/:todoId', requireAuth, paramIdValidation, paramTodoIdValidation, requireActiveMember, async (req, res) => {
+  try {
+    const todo = await projectTodoDb.findById(req.params.todoId, req.params.id);
+    if (!todo) return res.status(404).json({ success: false, message: 'Todo not found' });
+
+    const isMgmt = await isManagementOf(req.params.id, req.session.userId);
+    const isAuthor = todo.created_by === req.session.userId;
+    const isAssignee = todo.assigned_to === req.session.userId;
+    if (!isMgmt && !isAuthor && !isAssignee) {
+      return res.status(403).json({ success: false, message: 'Only creator/moderator, todo author, or assignee can toggle' });
+    }
+
+    await projectTodoDb.toggleComplete(req.params.todoId, req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Toggle todo error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// PUT: Edit a todo (creator/mod, or original author)
+router.put('/:id/todos/:todoId', requireAuth, paramIdValidation, paramTodoIdValidation, createTodoValidation, requireActiveMember, async (req, res) => {
+  try {
+    const todo = await projectTodoDb.findById(req.params.todoId, req.params.id);
+    if (!todo) return res.status(404).json({ success: false, message: 'Todo not found' });
+
+    const isMgmt = await isManagementOf(req.params.id, req.session.userId);
+    const isAuthor = todo.created_by === req.session.userId;
+    if (!isMgmt && !isAuthor) {
+      return res.status(403).json({ success: false, message: 'Only creator/moderator or todo author can edit' });
+    }
+
+    const { title, description, dueDate, assignedTo } = req.body;
+
+    // Only mgmt can set or change assignment
+    if (!isMgmt && assignedTo !== (todo.assigned_to || null)) {
+      return res.status(403).json({ success: false, message: 'Only creator or moderator can change assignment' });
+    }
+
+    await projectTodoDb.update(req.params.todoId, req.params.id, { title, description, dueDate, assignedTo });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Update todo error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// DELETE: Delete a todo (creator/mod, or original author)
+router.delete('/:id/todos/:todoId', requireAuth, paramIdValidation, paramTodoIdValidation, requireActiveMember, async (req, res) => {
+  try {
+    const todo = await projectTodoDb.findById(req.params.todoId, req.params.id);
+    if (!todo) return res.status(404).json({ success: false, message: 'Todo not found' });
+
+    const isMgmt = await isManagementOf(req.params.id, req.session.userId);
+    const isAuthor = todo.created_by === req.session.userId;
+    if (!isMgmt && !isAuthor) {
+      return res.status(403).json({ success: false, message: 'Only creator/moderator or todo author can delete' });
+    }
+
+    await projectTodoDb.delete(req.params.todoId, req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete todo error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

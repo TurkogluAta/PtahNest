@@ -139,6 +139,22 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_jrm_request ON join_request_messages(request_id, created_at)
   `);
 
+  // Project chat messages (persistent, for all members)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS project_messages (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      encrypted_content TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (sender_id) REFERENCES users(id)
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_pm_project ON project_messages(project_id, created_at)
+  `);
+
   // Kick votes table — democratic kick system
   await pool.query(`
     CREATE TABLE IF NOT EXISTS kick_votes (
@@ -206,11 +222,51 @@ async function initDatabase() {
       ON notifications(user_id) WHERE read_at IS NULL;
   `);
 
+  // Project todos
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS project_todos (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      due_date DATE,
+      assigned_to TEXT,
+      completed BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id),
+      FOREIGN KEY (assigned_to) REFERENCES users(id)
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_pt_project ON project_todos(project_id, created_at)
+  `);
+
   console.log('Database initialized');
 }
 
 // User database operations
 const userDb = {
+  // Find all PtahNest user IDs that have ever been linked to a given github_id.
+  // Combines: currently linked (users.github_id), past join request snapshots,
+  // and past project membership snapshots. Used to prevent ban/cooldown bypass
+  // via GitHub unlink + new account.
+  async findUserIdsByGithubId(githubId) {
+    if (!githubId) return [];
+    const { rows } = await pool.query(
+      `SELECT DISTINCT user_id FROM (
+         SELECT id AS user_id FROM users WHERE github_id = $1
+         UNION
+         SELECT user_id FROM join_requests WHERE github_id = $1
+         UNION
+         SELECT user_id FROM project_members WHERE github_id = $1
+       ) AS combined`,
+      [githubId]
+    );
+    return rows.map(r => r.user_id);
+  },
+
   // Create new user
   async create(username, email, password) {
     const id = require('crypto').randomUUID();
@@ -507,7 +563,16 @@ const projectDb = {
     let rows;
 
     if (userId) {
-      // Logged in: exclude projects where user is ACTIVE member
+      // Build the full set of user_ids that share this user's github_id (bypass prevention).
+      // If user has no GitHub linked, list is just [userId].
+      const githubInfo = await githubDb.getGithubInfo(userId);
+      const linkedIds = githubInfo && githubInfo.github_id
+        ? await userDb.findUserIdsByGithubId(githubInfo.github_id)
+        : [];
+      const allUserIds = Array.from(new Set([userId, ...linkedIds]));
+
+      // Logged in: exclude projects where user is ACTIVE member, has pending request,
+      // OR was previously kicked/left (under any account sharing the same github_id)
       const result = await pool.query(
         `SELECT p.*, u.username as creator_username,
           (SELECT COUNT(*) FROM project_members WHERE project_id = p.id AND membership_status = 'active') as members
@@ -516,13 +581,16 @@ const projectDb = {
         WHERE p.project_status = 'active'
           AND p.recruitment_open = TRUE
           AND p.id NOT IN (
-            SELECT project_id FROM project_members WHERE user_id = $1 AND membership_status = 'active'
+            SELECT project_id FROM project_members WHERE user_id = ANY($1::text[]) AND membership_status = 'active'
           )
           AND p.id NOT IN (
-            SELECT project_id FROM join_requests WHERE user_id = $1 AND status = 'pending'
+            SELECT project_id FROM join_requests WHERE user_id = ANY($1::text[]) AND status = 'pending'
+          )
+          AND p.id NOT IN (
+            SELECT project_id FROM project_members WHERE user_id = ANY($1::text[]) AND membership_status IN ('kicked', 'left')
           )
         ORDER BY p.created_at DESC`,
-        [userId]
+        [allUserIds]
       );
       rows = result.rows;
     } else {
@@ -848,14 +916,19 @@ const joinRequestDb = {
   },
 
   // Check if user was recently rejected (within 30 days)
-  async wasRecentlyRejected(projectId, userId) {
+  // Accepts a single userId or an array of userIds (for github_id-based bypass prevention)
+  async wasRecentlyRejected(projectId, userIdOrIds) {
+    const userIds = Array.isArray(userIdOrIds) ? userIdOrIds : [userIdOrIds];
+    if (userIds.length === 0) return { blocked: false };
+
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const { rows } = await pool.query(
       `SELECT * FROM join_requests
-      WHERE project_id = $1 AND user_id = $2 AND status = 'rejected' AND created_at > $3`,
-      [projectId, userId, thirtyDaysAgo.toISOString()]
+      WHERE project_id = $1 AND user_id = ANY($2::text[]) AND status = 'rejected' AND created_at > $3
+      ORDER BY created_at DESC LIMIT 1`,
+      [projectId, userIds, thirtyDaysAgo.toISOString()]
     );
     const request = rows[0];
 
@@ -1206,6 +1279,97 @@ const healthReadDb = {
   }
 };
 
+// Project todos database operations
+const projectTodoDb = {
+  async create(projectId, createdBy, { title, description, dueDate, assignedTo }) {
+    const id = require('crypto').randomUUID();
+    await pool.query(
+      `INSERT INTO project_todos (id, project_id, created_by, title, description, due_date, assigned_to)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, projectId, createdBy, title, description || null, dueDate || null, assignedTo || null]
+    );
+    return id;
+  },
+
+  async getByProjectId(projectId) {
+    const { rows } = await pool.query(
+      `SELECT t.id, t.project_id, t.created_by, t.assigned_to, t.title, t.description, t.due_date, t.completed, t.created_at,
+              u.username as created_by_username,
+              a.username as assigned_to_username
+       FROM project_todos t
+       JOIN users u ON t.created_by = u.id
+       LEFT JOIN users a ON t.assigned_to = a.id
+       WHERE t.project_id = $1
+       ORDER BY t.created_at ASC`,
+      [projectId]
+    );
+    return rows;
+  },
+
+  async findById(todoId, projectId) {
+    const { rows } = await pool.query(
+      `SELECT id, project_id, created_by, title, description, due_date, assigned_to, completed
+       FROM project_todos WHERE id = $1 AND project_id = $2`,
+      [todoId, projectId]
+    );
+    return rows[0] || null;
+  },
+
+  async toggleComplete(todoId, projectId) {
+    await pool.query(
+      `UPDATE project_todos SET completed = NOT completed
+       WHERE id = $1 AND project_id = $2`,
+      [todoId, projectId]
+    );
+  },
+
+  async update(todoId, projectId, { title, description, dueDate, assignedTo }) {
+    await pool.query(
+      `UPDATE project_todos
+       SET title = $3, description = $4, due_date = $5, assigned_to = $6
+       WHERE id = $1 AND project_id = $2`,
+      [todoId, projectId, title, description || null, dueDate || null, assignedTo || null]
+    );
+  },
+
+  async delete(todoId, projectId) {
+    await pool.query(
+      `DELETE FROM project_todos WHERE id = $1 AND project_id = $2`,
+      [todoId, projectId]
+    );
+  }
+};
+
+// Project chat messages database operations
+const projectMessageDb = {
+  async create(projectId, senderId, encryptedContent) {
+    const id = require('crypto').randomUUID();
+    await pool.query(
+      `INSERT INTO project_messages (id, project_id, sender_id, encrypted_content) VALUES ($1, $2, $3, $4)`,
+      [id, projectId, senderId, encryptedContent]
+    );
+    return id;
+  },
+
+  async getByProjectId(projectId) {
+    const { rows } = await pool.query(
+      `SELECT m.id, m.project_id, m.sender_id, m.encrypted_content, m.created_at,
+              u.username as sender_username,
+              pm.role as sender_role
+       FROM project_messages m
+       JOIN users u ON m.sender_id = u.id
+       LEFT JOIN project_members pm ON pm.project_id = m.project_id
+                                    AND pm.user_id = m.sender_id
+                                    AND pm.membership_status = 'active'
+       WHERE m.project_id = $1
+       ORDER BY m.created_at ASC
+       LIMIT 200`,
+      [projectId]
+    );
+    return rows;
+  }
+};
+
 const notificationDb = {
   async create(userId, type, projectId, projectName, meta = null) {
     const id = require('crypto').randomUUID();
@@ -1254,6 +1418,8 @@ module.exports = {
   memberDb,
   joinRequestDb,
   joinRequestMessageDb,
+  projectMessageDb,
+  projectTodoDb,
   githubDb,
   kickVoteDb,
   healthReadDb,

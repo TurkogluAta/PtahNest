@@ -81,11 +81,12 @@
             <!-- Dynamically populated -->
         </section>
 
-        <!-- Tab Bar (injected by JS when user has management role) -->
+        <!-- Tab Bar (shown to all members; Admin tab only for management) -->
         <div id="tabBar" style="display: none;" class="section-spacing-top">
             <div class="project-tabs">
                 <button class="tab-btn active" id="overviewTab" onclick="switchDetailTab('overview')">Overview</button>
-                <button class="tab-btn" id="adminTab" onclick="switchDetailTab('admin')">Admin Panel</button>
+                <button class="tab-btn" id="teamTab" onclick="switchDetailTab('team')">Team</button>
+                <button class="tab-btn" id="adminTab" onclick="switchDetailTab('admin')" style="display:none;">Admin Panel</button>
             </div>
         </div>
 
@@ -96,17 +97,37 @@
                 <!-- Dynamically populated -->
             </section>
 
+            <!-- Active Kick Votes (visible to all members; pinned on top when present) -->
+            <section id="activeVotesSection" class="section-spacing-top" style="display: none;">
+                <h2 class="section-heading">
+                    <span class="health-status-dot"></span>
+                    Active Kick Votes
+                </h2>
+                <div id="overviewActiveKicksPanel" class="health-panel open">
+                    <div id="activeVotesContainer"></div>
+                </div>
+            </section>
+
+            <!-- Contribution Leaderboard (mock until commit voting backend is ready) -->
+            <section id="leaderboardSection" class="section-spacing-top">
+                <h2 class="section-heading">
+                    <span class="health-status-dot"></span>
+                    Contribution Leaderboard
+                    <span class="mock-badge">mock</span>
+                </h2>
+                <div id="leaderboardPanel" class="health-panel open">
+                    <div id="leaderboardContainer"></div>
+                </div>
+            </section>
+
             <!-- Commits Section -->
             <section id="commitsSection" class="section-spacing-top" style="display: none;">
-                <div class="collapsible-heading" onclick="toggleCommits()">
-                    <h2 class="section-heading section-heading-gold">
-                        <span class="gold-star">★</span>
-                        Commit History
-                        <span class="gold-star">★</span>
-                    </h2>
-                    <span class="collapsible-chevron" id="commitsChevron">▾</span>
-                </div>
-                <div id="commitsPanel" class="health-panel">
+                <h2 class="section-heading section-heading-gold">
+                    <span class="gold-star">★</span>
+                    Commit History
+                    <span class="gold-star">★</span>
+                </h2>
+                <div id="commitsPanel" class="health-panel open">
                     <div id="commitsContainer">
                         <!-- Dynamically populated -->
                     </div>
@@ -132,24 +153,101 @@
                 </div>
             </section>
 
-            <!-- Active Kick Votes (visible to all members) -->
-            <section id="activeVotesSection" class="section-spacing-top" style="display: none;">
-                <div class="collapsible-heading" onclick="toggleOverviewActiveKicks()">
-                    <h2 class="section-heading">
-                        <span class="health-status-dot"></span>
-                        Active Kick Votes
-                    </h2>
-                    <span class="collapsible-chevron" id="overviewActiveKicksChevron">▾</span>
-                </div>
-                <div id="overviewActiveKicksPanel" class="health-panel">
-                    <div id="activeVotesContainer"></div>
-                </div>
-            </section>
-
             <!-- Action Buttons Section -->
             <section id="actionsSection" class="section-spacing-top">
                 <!-- Dynamically populated based on role -->
             </section>
+        </div>
+
+        <!-- TEAM TAB CONTENT (Todo summary on top + Chat below) -->
+        <div id="teamContent" class="tab-content">
+            <div class="team-layout section-spacing-top">
+
+                <!-- TODO PANEL (collapsed by default — shows preview + expand) -->
+                <div class="team-todo-panel" id="teamTodoPanel">
+                    <!-- Header: title + stats + actions -->
+                    <div class="team-todo-header">
+                        <div class="team-todo-title">
+                            <img class="team-todo-icon" src="../pictures/icons/checklist.svg" width="18" height="18" alt="">
+                            <span>Todo</span>
+                            <span class="team-todo-stats">
+                                <span class="todo-stat-chip todo-stat-open"><strong id="todoCountOpen">0</strong> open</span>
+                                <span class="todo-stat-chip todo-stat-done"><strong id="todoCountDone">0</strong> done</span>
+                            </span>
+                            <span class="todo-stat-chip" style="display:none;"><strong id="todoCountTotal">0</strong> total</span>
+                        </div>
+                        <div class="team-todo-header-actions">
+                            <button class="btn btn-outline btn-sm" id="todoExpandBtn" onclick="toggleTodoExpand()">Show all</button>
+                            <button class="btn btn-primary btn-sm" onclick="openTodoModal()">+ New</button>
+                        </div>
+                    </div>
+
+                    <!-- Filter tabs (only visible when expanded) -->
+                    <div class="team-todo-filter" id="teamTodoFilter" style="display:none;">
+                        <div class="todo-filter-tabs">
+                            <button class="todo-filter-btn active" data-filter="all" onclick="setTodoFilter('all')">All</button>
+                            <button class="todo-filter-btn" data-filter="open" onclick="setTodoFilter('open')">Open</button>
+                            <button class="todo-filter-btn" data-filter="done" onclick="setTodoFilter('done')">Done</button>
+                        </div>
+                    </div>
+
+                    <!-- Todo List -->
+                    <div id="todoList" class="todo-list"></div>
+
+                    <!-- Pagination (only when expanded) -->
+                    <div id="todoPagination"></div>
+                </div>
+
+                <!-- CHAT PANEL (main focus) -->
+                <div class="team-chat-panel">
+                    <div class="project-chat-messages" id="projectChatMessages"></div>
+                    <div class="request-chat-input-row">
+                        <input type="text" id="projectChatInput" class="input-field"
+                               placeholder="Type a message..." maxlength="1000"
+                               onkeydown="if(event.key==='Enter')sendProjectMessage()">
+                        <button class="btn btn-primary btn-sm" onclick="sendProjectMessage()">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- New / Edit Todo Modal -->
+        <div id="todoModal" class="modal-overlay" style="display:none;">
+            <div class="modal-content todo-modal-content">
+                <button class="modal-close" onclick="closeTodoModal()">&times;</button>
+                <div class="card-title modal-title" id="todoModalTitle">New Todo</div>
+
+                <input type="hidden" id="todoEditId" value="">
+
+                <div class="input-group">
+                    <label class="input-label" for="todoTitleInput">Title *</label>
+                    <input type="text" id="todoTitleInput" class="input-field" placeholder="What needs to be done?" maxlength="200">
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label" for="todoDescInput">Description</label>
+                    <textarea id="todoDescInput" class="input-field" rows="3" placeholder="Optional details" maxlength="1000"></textarea>
+                </div>
+
+                <div class="todo-form-row">
+                    <div class="input-group">
+                        <label class="input-label" for="todoDueInput">Due Date</label>
+                        <input type="date" id="todoDueInput" class="input-field">
+                    </div>
+                    <div class="input-group" id="todoAssignGroup">
+                        <label class="input-label" for="todoAssignSelect">Assign To</label>
+                        <select id="todoAssignSelect" class="input-field">
+                            <option value="">Unassigned</option>
+                        </select>
+                        <p class="text-muted todo-assign-hint" id="todoAssignHint" style="display:none;">Only creator/moderator can assign todos.</p>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn btn-primary" id="todoSubmitBtn" onclick="submitTodo()">Create Todo</button>
+                    <button class="btn btn-outline" onclick="closeTodoModal()">Cancel</button>
+                </div>
+            </div>
         </div>
 
         <!-- ADMIN PANEL TAB CONTENT -->

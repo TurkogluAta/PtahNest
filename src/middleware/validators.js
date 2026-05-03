@@ -320,6 +320,19 @@ const healthReadValidation = [
   handleValidationErrors
 ];
 
+const createTodoValidation = [
+  body('title').trim().isLength({ min: 1, max: 200 }).withMessage('Title is required (max 200 chars)'),
+  body('description').optional({ nullable: true }).trim().isLength({ max: 1000 }).withMessage('Description too long'),
+  body('dueDate').optional({ nullable: true }).isISO8601().withMessage('Invalid due date'),
+  body('assignedTo').optional({ nullable: true }).isUUID().withMessage('Invalid assignedTo user ID'),
+  handleValidationErrors
+];
+
+const paramTodoIdValidation = [
+  param('todoId').isUUID().withMessage('Invalid todo ID'),
+  handleValidationErrors
+];
+
 module.exports = {
   registerValidation,
   loginValidation,
@@ -337,5 +350,7 @@ module.exports = {
   ballotValidation,
   messageContentValidation,
   paramUserIdValidation,
-  healthReadValidation
+  healthReadValidation,
+  createTodoValidation,
+  paramTodoIdValidation
 };

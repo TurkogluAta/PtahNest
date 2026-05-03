@@ -289,6 +289,72 @@ let notifChatMessages = [];
 // System notifications (accepted, rejected, kicked, project_deleted, project_completed)
 let notifSystem = [];
 
+// MOCK MODE — set to false to disable demo notifications
+const NOTIF_MOCK_MODE = true;
+
+function injectMockNotifications() {
+    const now = Date.now();
+    const minsAgo = (n) => new Date(now - n * 60000).toISOString();
+    const hoursAgo = (h) => new Date(now - h * 3600000).toISOString();
+
+    // Mock join requests + chat messages (management notifications)
+    notifRequests = notifRequests.concat([
+        {
+            id: 'mock-req-1', user_id: 'mock-u-1', username: 'alice',
+            projectId: 'mock-proj-1', projectName: 'PtahNest API Refactor',
+            created_at: minsAgo(8), notifKind: 'join',
+            management_message_count: 0, last_message_sender_id: null
+        },
+        {
+            id: 'mock-req-2', user_id: 'mock-u-2', username: 'bob',
+            projectId: 'mock-proj-2', projectName: 'Mobile Companion App',
+            created_at: minsAgo(45), notifKind: 'chat',
+            management_message_count: 2, last_message_sender_id: 'mock-u-2'
+        }
+    ]);
+
+    // Mock pending kick votes
+    notifKickVotes = notifKickVotes.concat([
+        {
+            id: 'mock-vote-1',
+            project_id: 'mock-proj-1',
+            project_name: 'PtahNest API Refactor',
+            target_username: 'charlie',
+            initiator_username: 'alice',
+            created_at: hoursAgo(3),
+            expires_at: hoursAgo(-45) // 45h in future
+        }
+    ]);
+
+    // Mock system notifications
+    notifSystem = notifSystem.concat([
+        {
+            id: 'mock-sys-1',
+            type: 'accepted',
+            project_id: 'mock-proj-3',
+            project_name: 'Open Source Docs',
+            created_at: hoursAgo(2),
+            meta: null
+        },
+        {
+            id: 'mock-sys-2',
+            type: 'rejected',
+            project_id: 'mock-proj-4',
+            project_name: 'Game Jam Entry',
+            created_at: hoursAgo(20),
+            meta: null
+        },
+        {
+            id: 'mock-sys-3',
+            type: 'kicked',
+            project_id: 'mock-proj-5',
+            project_name: 'Crypto Tracker',
+            created_at: hoursAgo(36),
+            meta: null
+        }
+    ]);
+}
+
 // Fetch join requests for all management projects (creator + moderator) + pending kick votes
 async function fetchNotifRequests() {
     try {
@@ -354,6 +420,8 @@ async function fetchNotifRequests() {
             const sysData = await sysRes.json();
             notifSystem = sysData.notifications || [];
         }
+
+        if (NOTIF_MOCK_MODE) injectMockNotifications();
 
         updateNotifBadge();
         renderNotifPanel();
