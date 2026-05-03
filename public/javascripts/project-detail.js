@@ -2128,6 +2128,11 @@ function configureAssignField() {
     }
 }
 
+function todayDateString() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function openTodoModal() {
     populateTodoAssignSelect();
     configureAssignField();
@@ -2136,7 +2141,9 @@ function openTodoModal() {
     document.getElementById('todoSubmitBtn').textContent = 'Create Todo';
     document.getElementById('todoTitleInput').value = '';
     document.getElementById('todoDescInput').value = '';
-    document.getElementById('todoDueInput').value = '';
+    const dueInput = document.getElementById('todoDueInput');
+    dueInput.value = '';
+    dueInput.min = todayDateString(); // block past dates in date picker
     document.getElementById('todoAssignSelect').value = '';
     document.getElementById('todoModal').style.display = 'flex';
     setTimeout(() => document.getElementById('todoTitleInput').focus(), 50);
@@ -2153,7 +2160,12 @@ function openEditTodoModal(todoId) {
     document.getElementById('todoSubmitBtn').textContent = 'Save Changes';
     document.getElementById('todoTitleInput').value = todo.title;
     document.getElementById('todoDescInput').value = todo.description || '';
-    document.getElementById('todoDueInput').value = todo.due_date ? todo.due_date.split('T')[0] : '';
+    const dueInput = document.getElementById('todoDueInput');
+    const existingDue = todo.due_date ? todo.due_date.split('T')[0] : '';
+    dueInput.value = existingDue;
+    // Edit: allow today onwards, but if existing due is older, allow it too (don't force change)
+    const today = todayDateString();
+    dueInput.min = (existingDue && existingDue < today) ? existingDue : today;
     document.getElementById('todoAssignSelect').value = todo.assigned_to || '';
     document.getElementById('todoModal').style.display = 'flex';
     setTimeout(() => document.getElementById('todoTitleInput').focus(), 50);
@@ -2168,10 +2180,17 @@ async function submitTodo() {
     const title = document.getElementById('todoTitleInput').value.trim();
     if (!title) { showToast('Title is required', 'error'); return; }
 
+    const dueDate = document.getElementById('todoDueInput').value || null;
+    // Block past dates on create; on edit, allow keeping the original past due
+    if (dueDate && !editId && dueDate < todayDateString()) {
+        showToast('Due date cannot be in the past', 'error');
+        return;
+    }
+
     const body = {
         title,
         description: document.getElementById('todoDescInput').value.trim() || null,
-        dueDate: document.getElementById('todoDueInput').value || null,
+        dueDate,
         assignedTo: document.getElementById('todoAssignSelect').value || null
     };
 

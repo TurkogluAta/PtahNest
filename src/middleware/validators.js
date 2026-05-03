@@ -323,7 +323,15 @@ const healthReadValidation = [
 const createTodoValidation = [
   body('title').trim().isLength({ min: 1, max: 200 }).withMessage('Title is required (max 200 chars)'),
   body('description').optional({ nullable: true }).trim().isLength({ max: 1000 }).withMessage('Description too long'),
-  body('dueDate').optional({ nullable: true }).isISO8601().withMessage('Invalid due date'),
+  body('dueDate').optional({ nullable: true }).isISO8601().withMessage('Invalid due date')
+    .custom((value, { req }) => {
+      // Only enforce future-or-today on create (POST). Edit (PUT) allows keeping past dates.
+      if (!value || req.method !== 'POST') return true;
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const due = new Date(value); due.setHours(0, 0, 0, 0);
+      if (due < today) throw new Error('Due date cannot be in the past');
+      return true;
+    }),
   body('assignedTo').optional({ nullable: true }).isUUID().withMessage('Invalid assignedTo user ID'),
   handleValidationErrors
 ];
