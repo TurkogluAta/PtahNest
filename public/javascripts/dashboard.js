@@ -89,6 +89,42 @@ function updateDashboardStats(projects) {
     if (finishedEl) finishedEl.textContent = finishedCount;
 }
 
+// Fetch user's certificates and render average star rating on dashboard
+async function loadAvgRating() {
+    try {
+        const res = await fetch('/api/certificates/me');
+        const data = await res.json();
+        if (!data.success) return;
+
+        const certs = data.data.certificates.filter(c => c.avg_rating != null);
+        const starEl = document.querySelector('.star-rating');
+        if (!starEl) return;
+
+        if (!certs.length) {
+            // No rated certs yet — show empty stars
+            starEl.innerHTML = Array(5).fill(`<img class="star" src="../pictures/icons/star.svg" width="24" />`).join('');
+            return;
+        }
+
+        // Weighted average across all certificates
+        const avg = certs.reduce((sum, c) => sum + parseFloat(c.avg_rating), 0) / certs.length;
+        const rounded = Math.round(avg * 2) / 2; // round to nearest 0.5
+        const filled = Math.floor(rounded);
+        const half = rounded % 1 !== 0;
+
+        let html = '';
+        for (let i = 0; i < 5; i++) {
+            if (i < filled) {
+                html += `<img class="star filled" src="../pictures/icons/star-filled.svg" width="24" />`;
+            } else {
+                html += `<img class="star" src="../pictures/icons/star.svg" width="24" />`;
+            }
+        }
+        starEl.innerHTML = html;
+        starEl.title = `${avg.toFixed(1)} avg across ${certs.length} project(s)`;
+    } catch (e) { /* silent */ }
+}
+
 // Helper functions for badge classes
 function getBadgeClass(status) {
     const badges = {
@@ -123,7 +159,7 @@ async function initDashboard() {
         }
 
         // Fetch data then reveal page
-        await fetchUserProjects();
+        await Promise.all([fetchUserProjects(), loadAvgRating()]);
         showMainContent();
     }
 }

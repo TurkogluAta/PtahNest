@@ -364,12 +364,19 @@ function renderRequestsPage() {
                 ? '<span class="req-chat-status req-chat-new">New Reply</span>'
                 : '<span class="req-chat-status req-chat-waiting">Waiting</span>';
 
+        const avgRating = r.applicant_avg_rating ? parseFloat(r.applicant_avg_rating) : null;
+        const certCount = parseInt(r.applicant_cert_count || 0);
+        const ratingBadge = avgRating != null
+            ? `<span class="certificate-card-rating req-rating-badge" title="${certCount} project(s)">★ ${avgRating.toFixed(1)}</span>`
+            : '';
+
         return `
         <div class="card card-sm card-bottom-gap req-card" onclick="openRequestDetail('${r.id}','${escapeHtml(r.username)}','${r.user_id}')">
             <div class="req-card-top">
                 <div class="req-card-left">
                     <div class="req-card-name-row">
                         <span class="member-name">${escapeHtml(r.username)}</span>
+                        ${ratingBadge}
                     </div>
                     <div class="req-card-meta">
                         ${hasGithub ? `<span class="req-meta-badge"><img src="../pictures/icons/github.svg" width="11" height="11"> ${escapeHtml(r.github_username || 'GitHub')}</span>` : ''}

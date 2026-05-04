@@ -4731,3 +4731,6 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
 .github-icon-dim { opacity: 0.8; }
 .profile-info-row-last { border-bottom: none; padding: 0; }
 .cert-error-back { margin-top: 1rem; }
+
+.req-card-name-row { display: flex; align-items: center; gap: 0.5rem; }
+.req-rating-badge { font-size: 0.75rem; }
