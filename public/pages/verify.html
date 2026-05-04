@@ -17,7 +17,8 @@
         const TRIGGER_LABELS = { completed: 'PROJECT COMPLETED', left: 'LEFT PROJECT', kicked: 'KICKED', deleted: 'PROJECT ENDED' };
 
         async function verify() {
-            const id = new URLSearchParams(window.location.search).get('id');
+            // Support both /verify/:id and ?id= formats
+            const id = window.location.pathname.split('/').pop() || new URLSearchParams(window.location.search).get('id');
             const card = document.getElementById('verifyCard');
 
             if (!id) {

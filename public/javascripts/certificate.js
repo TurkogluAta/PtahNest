@@ -338,7 +338,7 @@ function drawPie(svg, pie, myUsername) {
 
 function drawVerifyUrl(svg, certId, payload) {
     if (!certId) return;
-    const url = `ptahnest.me/verify/${certId}`;
+    const url = `https://ptahnest.me/verify/${certId}`;
     // Verify link — bottom left
     svg.appendChild(txt(`Verify: ${url}`, {
         x: P, y: 534, fill: C.dim,

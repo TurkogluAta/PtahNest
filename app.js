@@ -123,6 +123,11 @@ app.use('/api/notifications', notificationRouter);
 app.use('/api/certificates', apiLimiter);
 app.use('/api/certificates', certificateRouter);
 
+// Public certificate verify page — /verify/:id serves verify.html, JS reads ID from path
+app.get('/verify/:id', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public/pages/verify.html'));
+});
+
 // Redirect root to appropriate page based on auth status
 app.get('/', (req, res) => {
   // If user is logged in, redirect to dashboard
