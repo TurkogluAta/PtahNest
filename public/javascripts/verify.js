@@ -28,6 +28,18 @@ async function verify() {
         const label = TRIGGER_LABELS[c.trigger_type] || c.trigger_type;
         const date = new Date(c.issued_at).toLocaleDateString('en-IE', { day: 'numeric', month: 'long', year: 'numeric' });
 
+        // Calculate this user's contribution share from pie data
+        let contributionHtml = '';
+        if (c.effort_pie && c.github_username) {
+            const pie = typeof c.effort_pie === 'string' ? JSON.parse(c.effort_pie) : c.effort_pie;
+            const total = pie.reduce((sum, p) => sum + parseFloat(p.commits || 0), 0);
+            const mine = pie.find(p => p.githubUsername === c.github_username);
+            if (mine && total > 0) {
+                const pct = Math.round((parseFloat(mine.commits) / total) * 100);
+                contributionHtml = `<div class="verify-row"><span class="verify-label">Contribution</span><span class="verify-value">${pct}% of project stars</span></div>`;
+            }
+        }
+
         card.innerHTML = `
             <div class="verify-icon">✅</div>
             <div class="verify-title">Certificate Verified</div>
@@ -40,6 +52,7 @@ async function verify() {
                 ${c.was_creator ? `<div class="verify-row"><span class="verify-label">Role</span><span class="verify-value verify-creator-value">★ Project Creator</span></div>` : ''}
                 ${c.commit_count > 0 ? `<div class="verify-row"><span class="verify-label">Commits</span><span class="verify-value">${c.commit_count}</span></div>` : ''}
                 ${c.avg_rating != null ? `<div class="verify-row"><span class="verify-label">Avg Rating</span><span class="verify-value">★ ${parseFloat(c.avg_rating).toFixed(1)} / 5</span></div>` : ''}
+                ${contributionHtml}
             </div>
             <div class="verify-footer"><a href="https://ptahnest.me">ptahnest.me</a></div>
         `;

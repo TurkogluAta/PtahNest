@@ -35,7 +35,9 @@ router.get('/verify/:id', async (req, res) => {
                 SELECT ROUND(AVG((elem->>'rating')::numeric), 1)
                 FROM jsonb_array_elements(c.payload->'timeline') AS elem
                 WHERE elem->>'rating' IS NOT NULL
-              ) AS avg_rating
+              ) AS avg_rating,
+              c.payload->>'githubUsername' AS github_username,
+              c.payload->'monthlyEffortPie' AS effort_pie
        FROM certificates c WHERE c.id = $1`,
       [req.params.id]
     );
