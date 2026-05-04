@@ -38,6 +38,8 @@ async function verify() {
                 <div class="verify-row"><span class="verify-label">Status</span><span class="verify-badge cert-trigger-${c.trigger_type}">${label}</span></div>
                 <div class="verify-row"><span class="verify-label">Issued</span><span class="verify-value">${date}</span></div>
                 ${c.was_creator ? `<div class="verify-row"><span class="verify-label">Role</span><span class="verify-value verify-creator-value">★ Project Creator</span></div>` : ''}
+                ${c.commit_count > 0 ? `<div class="verify-row"><span class="verify-label">Commits</span><span class="verify-value">${c.commit_count}</span></div>` : ''}
+                ${c.avg_rating != null ? `<div class="verify-row"><span class="verify-label">Avg Rating</span><span class="verify-value">★ ${parseFloat(c.avg_rating).toFixed(1)} / 5</span></div>` : ''}
             </div>
             <div class="verify-footer"><a href="https://ptahnest.me">ptahnest.me</a></div>
         `;

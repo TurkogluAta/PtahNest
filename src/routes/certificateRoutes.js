@@ -28,7 +28,14 @@ router.get('/verify/:id', async (req, res) => {
       `SELECT c.id, c.trigger_type, c.was_creator, c.issued_at,
               c.payload->>'projectName' AS project_name,
               c.payload->>'username' AS username,
-              c.payload->>'issuedMonth' AS issued_month
+              c.payload->>'issuedMonth' AS issued_month,
+              c.payload->>'projectType' AS project_type,
+              jsonb_array_length(c.payload->'timeline') AS commit_count,
+              (
+                SELECT ROUND(AVG((elem->>'rating')::numeric), 1)
+                FROM jsonb_array_elements(c.payload->'timeline') AS elem
+                WHERE elem->>'rating' IS NOT NULL
+              ) AS avg_rating
        FROM certificates c WHERE c.id = $1`,
       [req.params.id]
     );
