@@ -1028,7 +1028,10 @@ const joinRequestDb = {
       `SELECT jr.*, u.username, u.email, u.github_username,
               (SELECT m.sender_id FROM join_request_messages m WHERE m.request_id = jr.id ORDER BY m.created_at DESC LIMIT 1) as last_message_sender_id,
               (SELECT COUNT(*) FROM join_request_messages m WHERE m.request_id = jr.id AND m.sender_id != jr.user_id) as management_message_count,
-              (SELECT AVG(c.avg_rating) FROM certificates c WHERE c.user_id = jr.user_id AND c.avg_rating IS NOT NULL) as applicant_avg_rating,
+              (SELECT ROUND(AVG(sub.avg_rating), 1) FROM (
+                SELECT (SELECT AVG((elem->>'rating')::numeric) FROM jsonb_array_elements(c.payload->'timeline') AS elem WHERE elem->>'rating' IS NOT NULL) AS avg_rating
+                FROM certificates c WHERE c.user_id = jr.user_id
+              ) sub WHERE sub.avg_rating IS NOT NULL) as applicant_avg_rating,
               (SELECT COUNT(*) FROM certificates c WHERE c.user_id = jr.user_id) as applicant_cert_count
       FROM join_requests jr
       JOIN users u ON jr.user_id = u.id
