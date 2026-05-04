@@ -20,6 +20,7 @@ async function cleanDatabase() {
   await pool.query('DELETE FROM kick_votes');
   await pool.query('DELETE FROM join_requests');
   await pool.query('DELETE FROM project_messages');
+  await pool.query('DELETE FROM commit_votes');
   await pool.query('DELETE FROM project_todos');
   await pool.query('DELETE FROM project_members');
   await pool.query('DELETE FROM projects');

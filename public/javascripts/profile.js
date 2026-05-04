@@ -192,6 +192,10 @@ async function unlinkGithub() {
                 if (data.success) {
                     showToast('GitHub account unlinked', 'success');
                     loadGithubStatus();
+                } else if (data.blockedProjects && data.blockedProjects.length > 0) {
+                    // Show which projects are blocking the unlink
+                    const projectNames = data.blockedProjects.map(p => p.name).join(', ');
+                    showToast(`Cannot unlink: active in software project(s): ${projectNames}`, 'error', 6000);
                 } else {
                     showToast(data.message || 'Failed to unlink GitHub account', 'error');
                 }
@@ -204,9 +208,131 @@ async function unlinkGithub() {
     );
 }
 
+// Certificates
+const CERTS_PER_PAGE = 6;
+let certsPage = 1;
+let certsData = [];
+
+
+function renderCertificatesPage() {
+    const grid = document.getElementById('certificatesGrid');
+    const pagination = document.getElementById('certsPagination');
+    if (!grid) return;
+
+    const triggerLabel = { left: 'Left', kicked: 'Kicked', completed: 'Completed', deleted: 'Deleted' };
+    const triggerColor = { left: '#8b949e', kicked: '#f85149', completed: '#3fb950', deleted: '#8b949e' };
+
+    const totalPages = Math.ceil(certsData.length / CERTS_PER_PAGE);
+    const start = (certsPage - 1) * CERTS_PER_PAGE;
+    const page = certsData.slice(start, start + CERTS_PER_PAGE);
+
+    grid.innerHTML = page.map(c => {
+        const avgRating = c.avg_rating ? parseFloat(c.avg_rating) : null;
+        const ratingHtml = avgRating != null
+            ? `<span class="certificate-card-rating">★ ${avgRating.toFixed(1)}</span>`
+            : '';
+        return `
+        <a href="/pages/certificate.html?id=${c.id}" class="certificate-card">
+            <div class="certificate-card-name">
+                ${c.was_creator ? '<span class="cert-creator-star">★</span>' : ''}${c.project_name || 'Project'}
+            </div>
+            <div class="certificate-card-meta">
+                <span class="certificate-trigger-badge cert-trigger-${c.trigger_type || 'default'}">${triggerLabel[c.trigger_type] || c.trigger_type}</span>
+                ${ratingHtml}
+                <span class="certificate-card-date">${new Date(c.issued_at).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+            </div>
+        </a>`;
+    }).join('');
+
+    if (!pagination) return;
+    if (totalPages <= 1) { pagination.innerHTML = ''; return; }
+    pagination.innerHTML = `
+        <div class="health-pagination">
+            <button class="health-page-btn" onclick="changeCertsPage(${certsPage - 1})" ${certsPage === 1 ? 'disabled' : ''}>←</button>
+            <span class="health-page-info">${certsPage} / ${totalPages}</span>
+            <button class="health-page-btn" onclick="changeCertsPage(${certsPage + 1})" ${certsPage === totalPages ? 'disabled' : ''}>→</button>
+        </div>`;
+}
+
+function changeCertsPage(p) {
+    const totalPages = Math.ceil(certsData.length / CERTS_PER_PAGE);
+    certsPage = Math.max(1, Math.min(p, totalPages));
+    renderCertificatesPage();
+}
+
+async function loadCertificates() {
+    const grid = document.getElementById('certificatesGrid');
+    if (!grid) return;
+    try {
+        const res = await fetch('/api/certificates/me');
+        const data = await res.json();
+        certsData = (data.success && data.data.certificates.length)
+            ? data.data.certificates
+            : [];
+        certsPage = 1;
+        if (!certsData.length) {
+            grid.innerHTML = '<p class="text-muted certificate-grid-empty">No certificates yet. Complete or leave a project to earn one.</p>';
+            return;
+        }
+        renderCertificatesPage();
+    } catch (e) {
+        console.error('loadCertificates error:', e);
+        grid.innerHTML = '<p class="text-muted certificate-grid-empty">Could not load certificates.</p>';
+    }
+}
+
+// Show dev tools panel only for adminAta (checked against loaded user, not hostname)
+function initDevTools() {
+    const card = document.getElementById('devToolsCard');
+    if (!card) return;
+    if (currentUser && currentUser.username === 'adminAta') {
+        card.style.display = '';
+    }
+}
+
+async function devResetMock() {
+    const btn = document.getElementById('resetMockBtn');
+    btn.disabled = true;
+    btn.textContent = 'Resetting...';
+    try {
+        const res = await fetch('/api/certificates/dev/reset-mock', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Mock data reset complete', 'success');
+            await loadCertificates();
+        } else {
+            showToast(data.message || 'Reset failed', 'error');
+        }
+    } catch (e) {
+        showToast('Reset request failed', 'error');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Reset Mock Data';
+}
+
+async function devSeedMock() {
+    const btn = document.getElementById('seedMockBtn');
+    btn.disabled = true;
+    btn.textContent = 'Seeding...';
+    try {
+        const res = await fetch('/api/certificates/dev/seed-mock', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Mock data seeded', 'success');
+        } else {
+            showToast(data.message || 'Seed failed', 'error');
+        }
+    } catch (e) {
+        showToast('Seed request failed', 'error');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Seed Mock Data';
+}
+
 // Init
 (async function initProfile() {
     checkGithubCallback();
-    await Promise.all([loadUserProfile(), loadGithubStatus()]);
+    await Promise.all([loadUserProfile(), loadGithubStatus(), loadCertificates()]);
+    initDevTools();
     showMainContent();
 })();

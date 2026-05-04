@@ -73,7 +73,7 @@ async function fetchMembers() {
             renderActions();
             initTabBar();
             loadKickVotes(); // active votes visible to all members
-            renderLeaderboard();
+            renderLeaderboard(); // async, no await needed on page load
         } else {
             // User not authorized to view members
             const data = await response.json();
@@ -249,6 +249,12 @@ function changeTeamMembersPage(page) {
 function initTabBar() {
     const isManagement = currentUserRole === 'creator' || currentUserRole === 'moderator';
     const isMember = !!currentUserRole; // any active role
+
+    // Hide chat input row on past/inactive projects — read-only view only
+    if (project.status !== 'active') {
+        const chatInputRow = document.querySelector('.team-chat-panel .request-chat-input-row');
+        if (chatInputRow) chatInputRow.style.display = 'none';
+    }
 
     if (isMember && project.status === 'active') {
         document.getElementById('tabBar').style.display = 'block';
@@ -790,6 +796,7 @@ function formatTimeRemaining(expiresAt) {
 }
 
 async function castBallot(voteId, ballot) {
+    if (!project || project.status !== 'active') return;
     try {
         const res = await fetch(`/api/projects/${projectId}/kick-votes/${voteId}/ballot`, {
             method: 'POST',
@@ -1272,7 +1279,7 @@ function renderActions() {
             'kicked': 'You have been removed from this project'
         };
         document.getElementById('actionsSection').innerHTML = `
-            <div class="card card-sm card-centered">
+            <div class="card card-centered project-status-banner">
                 <p class="text-muted">${statusMessages[project.status] || 'This project is no longer active'}</p>
             </div>
         `;
@@ -1529,34 +1536,31 @@ function formatDate(dateString) {
 
 let leaderboardPage = 1;
 const LEADERBOARD_PER_PAGE = 5;
+let leaderboardCache = null;
 
-function computeLeaderboard() {
-    // Group commits by author. Only commits with a real rating contribute to the score.
-    const byAuthor = {};
-    (allCommits || []).forEach(c => {
-        const author = c.author || 'Unknown';
-        if (!byAuthor[author]) {
-            byAuthor[author] = { author, avatar: c.avatar || null, commits: 0, totalRating: 0, ratedCommits: 0 };
+async function fetchLeaderboard() {
+    try {
+        const res = await fetch(`/api/projects/${projectId}/leaderboard`);
+        const data = await res.json();
+        if (data.success) {
+            // Map backend format to frontend display format
+            leaderboardCache = data.data.leaderboard.map(e => ({
+                author: e.githubUsername,
+                avatar: null,
+                commits: e.commits,
+                avgRating: e.avgRating,
+                score: e.score
+            }));
         }
-        byAuthor[author].commits += 1;
-        if (c.rating != null) {
-            byAuthor[author].totalRating += c.rating;
-            byAuthor[author].ratedCommits += 1;
-        }
-    });
-
-    return Object.values(byAuthor).map(a => ({
-        ...a,
-        avgRating: a.ratedCommits > 0 ? a.totalRating / a.ratedCommits : 0,
-        score: a.totalRating
-    })).sort((a, b) => b.score - a.score);
+    } catch (e) { /* silently fail, keep stale cache */ }
 }
 
-function renderLeaderboard() {
+async function renderLeaderboard() {
     const container = document.getElementById('leaderboardContainer');
     if (!container) return;
 
-    const entries = computeLeaderboard();
+    await fetchLeaderboard();
+    const entries = leaderboardCache || [];
     if (entries.length === 0) {
         container.innerHTML = '<p class="text-muted section-empty-message">No data yet.</p>';
         return;
@@ -1629,9 +1633,9 @@ function renderLeaderboard() {
     container.innerHTML = podiumHTML + tableHTML;
 }
 
-function changeLeaderboardPage(page) {
+async function changeLeaderboardPage(page) {
     leaderboardPage = page;
-    renderLeaderboard();
+    await renderLeaderboard();
 }
 
 // ========================================
@@ -1690,6 +1694,9 @@ async function fetchCommits(page = 1) {
         commitHasNext = data.hasNextPage;
         commitLoading = false;
 
+        // Fetch real vote data (avg + user's own votes) for this page
+        await fetchCommitVotes(allCommits.map(c => c.sha));
+
         renderCommits();
         renderLeaderboard(); // refresh leaderboard with real commit data
     } catch (error) {
@@ -1738,8 +1745,7 @@ function renderCommits() {
                 ? `<img class="commit-avatar" src="${commit.avatar}" alt="${commit.author}">`
                 : `<div class="commit-avatar-placeholder">${commit.author.charAt(0).toUpperCase()}</div>`;
 
-            // Effort rating only shown when commit voting backend provides it
-            const ratingHTML = commit.rating != null ? renderCommitRating(commit.rating) : '';
+            const ratingHTML = renderInteractiveRating(commit);
             html += `
                 <div class="commit-item">
                     ${avatarHTML}
@@ -1802,6 +1808,153 @@ function renderCommitRating(value) {
             <span class="commit-rating-value">${v.toFixed(1)}</span>
         </div>
     `;
+}
+
+// Fetch real vote averages and user's own votes from the backend,
+// then merge them into allCommits in-place.
+async function fetchCommitVotes(shas) {
+    if (!shas.length) return;
+    try {
+        const q = shas.join(',');
+        const res = await fetch(`/api/projects/${projectId}/commit-votes?shas=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        if (!data.success) return;
+        const { averages, userVotes } = data.data;
+        allCommits = allCommits.map(c => ({
+            ...c,
+            rating: averages[c.sha]?.avg || null,
+            voteCount: averages[c.sha]?.count || 0,
+            userRating: userVotes[c.sha] || 0
+        }));
+    } catch (e) { /* silent: votes are non-critical */ }
+}
+
+// Determine if current user can vote on this commit
+function canVoteOnCommit(commit) {
+    if (!currentUserId) return { canVote: false, reason: 'login' };
+    // Project must be active — no voting on past/completed/deleted projects
+    if (!project || project.status !== 'active') return { canVote: false, reason: 'project-inactive' };
+    const me = members.find(m => m.user_id === currentUserId);
+    if (!me) return { canVote: false, reason: 'not-member' };
+
+    // Can't vote on own commit (match by github_username)
+    if (me.github_username && commit.author && commit.author === me.github_username) {
+        return { canVote: false, reason: 'own' };
+    }
+
+    // Can't vote on commits made before joining (creator exempt — repo may predate project)
+    if (me.role !== 'creator' && me.joined_at && new Date(commit.date) < new Date(me.joined_at)) {
+        return { canVote: false, reason: 'before-join' };
+    }
+
+    return { canVote: true };
+}
+
+// Render interactive 5-star rating with hover preview
+function renderInteractiveRating(commit) {
+    const { canVote, reason } = canVoteOnCommit(commit);
+    const userRating = commit.userRating || 0;
+    const avgRating = commit.rating != null ? commit.rating : 0;
+
+    const tooltipMap = {
+        'login': 'Log in to vote',
+        'not-member': 'Members only',
+        'own': "Can't rate your own commit",
+        'before-join': 'You joined after this commit',
+        'project-inactive': 'Project is no longer active'
+    };
+    const tooltip = canVote
+        ? (userRating > 0 ? `Your rating: ${userRating}/5 (click to change)` : 'Click to rate')
+        : tooltipMap[reason];
+
+    // Display logic:
+    // - User has voted → stars show their rating in bright gold (filled-mine)
+    // - No vote yet → stars show community average in dim gold (filled-avg)
+    // - No avg either → stars empty/disabled
+    const displayValue = userRating || avgRating;
+    const fillVariant = userRating ? 'filled-mine' : 'filled-avg';
+    let stars = '';
+    for (let i = 1; i <= 5; i++) {
+        const filled = displayValue >= i ? fillVariant : '';
+        const interactiveAttrs = canVote
+            ? `data-rating="${i}" onclick="rateCommit('${commit.sha}', ${i})" onmouseover="previewRating(this, ${i})" onmouseout="resetRatingPreview(this)"`
+            : '';
+        stars += `<span class="commit-rating-star ${filled} ${canVote ? 'interactive' : 'disabled'}" ${interactiveAttrs}>★</span>`;
+    }
+
+    // Number label next to stars:
+    //   voted:    "<mine> / <avg> avg"
+    //   no vote:  "<avg> avg (n)"
+    let valueLabel = '';
+    if (userRating && avgRating > 0) {
+        valueLabel = `
+            <span class="commit-rating-meta">
+                <span class="commit-rating-value-mine">${userRating}</span>
+                <span class="commit-rating-sep">/</span>
+                <span class="commit-rating-avg">${avgRating.toFixed(1)} avg</span>
+            </span>`;
+    } else if (userRating) {
+        valueLabel = `<span class="commit-rating-meta"><span class="commit-rating-value-mine">${userRating}</span></span>`;
+    } else if (avgRating > 0) {
+        const countSuffix = commit.voteCount ? ` <span class="commit-rating-count">(${commit.voteCount})</span>` : '';
+        valueLabel = `<span class="commit-rating-meta"><span class="commit-rating-avg">${avgRating.toFixed(1)} avg</span>${countSuffix}</span>`;
+    }
+
+    return `
+        <div class="commit-rating ${canVote ? '' : 'commit-rating-disabled'}" title="${tooltip}" data-sha="${commit.sha}">
+            <span class="commit-rating-stars">${stars}</span>
+            ${valueLabel}
+        </div>
+    `;
+}
+
+// Hover: fill stars up to hovered index
+function previewRating(starEl, n) {
+    const container = starEl.closest('.commit-rating-stars');
+    if (!container) return;
+    container.querySelectorAll('.commit-rating-star').forEach((s, i) => {
+        s.classList.toggle('preview', i < n);
+    });
+}
+
+// Mouse out: clear preview, fall back to actual rating
+function resetRatingPreview(starEl) {
+    const container = starEl.closest('.commit-rating-stars');
+    if (!container) return;
+    container.querySelectorAll('.commit-rating-star').forEach(s => s.classList.remove('preview'));
+}
+
+// Click a star → cast or remove a vote via API
+async function rateCommit(sha, n) {
+    if (!project || project.status !== 'active') return;
+    const commit = allCommits.find(c => c.sha === sha);
+    const currentRating = commit?.userRating || 0;
+
+    try {
+        if (currentRating === n) {
+            // Same star clicked → remove vote
+            const res = await fetch(`/api/projects/${projectId}/commit-votes/${encodeURIComponent(sha)}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (!data.success) { showToast('Could not remove rating', 'error'); return; }
+            allCommits = allCommits.map(c => c.sha === sha
+                ? { ...c, userRating: 0, rating: data.data?.avg || null, voteCount: data.data?.count || 0 }
+                : c);
+        } else {
+            // New or changed vote → upsert (include author for leaderboard weight)
+            const res = await fetch(`/api/projects/${projectId}/commit-votes`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sha, rating: n, commitAuthor: commit?.author || null })
+            });
+            const data = await res.json();
+            if (!data.success) { showToast('Could not save rating', 'error'); return; }
+            allCommits = allCommits.map(c => c.sha === sha
+                ? { ...c, userRating: n, rating: data.data.avg, voteCount: data.data.count }
+                : c);
+        }
+        renderCommits();
+        renderLeaderboard();
+    } catch (e) { showToast('Network error', 'error'); }
 }
 
 // Load specific commit page (replaces current view)
@@ -1920,6 +2073,11 @@ function renderTodos() {
     updateTodoStats();
 
     const isManagement = currentUserRole === 'creator' || currentUserRole === 'moderator';
+    const isActive = project && project.status === 'active'; // no write actions on past projects
+
+    // Hide "+ New" todo button on past projects
+    const newTodoBtn = document.querySelector('[onclick="openTodoModal()"]');
+    if (newTodoBtn) newTodoBtn.style.display = isActive ? '' : 'none';
 
     // Collapsed mode: show first N open todos as preview, no pagination/filter
     let displayTodos;
@@ -1959,8 +2117,8 @@ function renderTodos() {
         const isOverdue = t.due_date && !t.completed && new Date(t.due_date) < new Date();
         const isAuthor = t.created_by === currentUserId;
         const isAssignee = t.assigned_to === currentUserId;
-        const canModify = isManagement || isAuthor; // edit/delete
-        const canToggle = isManagement || isAuthor || isAssignee; // toggle complete
+        const canModify = isActive && (isManagement || isAuthor); // edit/delete — read-only on past projects
+        const canToggle = isActive && (isManagement || isAuthor || isAssignee); // toggle — read-only on past projects
         const titleAttr = t.description ? ` title="${escapeHtml(t.description)}"` : '';
         const toggleDisabled = !canToggle;
         const checkboxTitle = toggleDisabled ? 'Only creator/moderator, todo author, or assignee can toggle' : 'Toggle complete';
@@ -2026,6 +2184,7 @@ function todayDateString() {
 }
 
 function openTodoModal() {
+    if (!project || project.status !== 'active') return;
     populateTodoAssignSelect();
     configureAssignField();
     document.getElementById('todoEditId').value = '';
@@ -2068,6 +2227,7 @@ function closeTodoModal() {
 }
 
 async function submitTodo() {
+    if (!project || project.status !== 'active') return;
     const editId = document.getElementById('todoEditId').value;
     const title = document.getElementById('todoTitleInput').value.trim();
     if (!title) { showToast('Title is required', 'error'); return; }
@@ -2110,6 +2270,7 @@ async function submitTodo() {
 }
 
 async function toggleTodo(todoId) {
+    if (!project || project.status !== 'active') return;
     try {
         await fetch(`/api/projects/${projectId}/todos/${todoId}`, { method: 'PATCH' });
         fetchTodos();
@@ -2119,6 +2280,7 @@ async function toggleTodo(todoId) {
 }
 
 async function deleteTodo(todoId) {
+    if (!project || project.status !== 'active') return;
     try {
         const res = await fetch(`/api/projects/${projectId}/todos/${todoId}`, { method: 'DELETE' });
         const data = await res.json();
@@ -2172,6 +2334,7 @@ function renderProjectMessages(messages) {
 }
 
 async function sendProjectMessage() {
+    if (!project || project.status !== 'active') return;
     const input = document.getElementById('projectChatInput');
     const content = input.value.trim();
     if (!content) return;

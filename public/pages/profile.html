@@ -149,16 +149,39 @@
         <div class="card profile-card profile-card-github">
             <div class="profile-card-header">
                 <div class="profile-github-left">
-                    <img src="../pictures/icons/github.svg" width="20" height="20" style="opacity:0.8;">
+                    <img src="../pictures/icons/github.svg" width="20" height="20" class="github-icon-dim">
                     <div class="card-title">GitHub</div>
                 </div>
                 <div id="githubActions"></div>
             </div>
             <div id="githubMessage" class="github-message" style="display:none;"></div>
-            <div class="profile-info-row" style="border-bottom: none; padding: 0;">
+            <div class="profile-info-row profile-info-row-last">
                 <span class="profile-info-label">Account</span>
                 <span class="profile-info-value" id="githubStatus">Loading...</span>
             </div>
+        </div>
+
+        <!-- Certificates -->
+        <div class="card profile-card profile-card-spaced">
+            <div class="profile-section-header">
+                <h2 class="profile-section-title">Certificates</h2>
+            </div>
+            <div id="certificatesGrid" class="certificate-grid">
+                <p class="text-muted certificate-grid-empty">Loading certificates...</p>
+            </div>
+            <div id="certsPagination" class="certs-pagination"></div>
+        </div>
+
+        <!-- Dev Tools (localhost only) -->
+        <div class="card profile-card dev-tools-card" id="devToolsCard" style="display: none;">
+            <div class="profile-section-header">
+                <h2 class="profile-section-title dev-tools-title">Dev Tools</h2>
+            </div>
+            <div class="dev-tools-buttons">
+                <button class="btn btn-secondary" id="resetMockBtn" onclick="devResetMock()">Reset Mock Data</button>
+                <button class="btn btn-secondary" id="seedMockBtn" onclick="devSeedMock()">Seed Mock Data</button>
+            </div>
+            <p class="text-muted dev-tools-note">Reset: erases test certs/votes, restores projects to active. Seed: inserts initial mock users/projects if missing.</p>
         </div>
 
     </main>

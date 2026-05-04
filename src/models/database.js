@@ -187,11 +187,16 @@ async function initDatabase() {
       vote_id TEXT NOT NULL,
       voter_user_id TEXT NOT NULL,
       ballot TEXT NOT NULL,
+      weight NUMERIC(6,2) NOT NULL DEFAULT 1,
       cast_at TIMESTAMPTZ DEFAULT NOW(),
       FOREIGN KEY (vote_id) REFERENCES kick_votes(id),
       FOREIGN KEY (voter_user_id) REFERENCES users(id),
       UNIQUE(vote_id, voter_user_id)
     )
+  `);
+  // Migration: add weight column if missing (existing deployments)
+  await pool.query(`
+    ALTER TABLE kick_vote_ballots ADD COLUMN IF NOT EXISTS weight NUMERIC(6,2) NOT NULL DEFAULT 1
   `);
 
   // Health issue acknowledgments — creator/mod can mark issues as read
@@ -241,6 +246,62 @@ async function initDatabase() {
   `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_pt_project ON project_todos(project_id, created_at)
+  `);
+
+  // Commit votes — members rate each other's commits (1-5 stars)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS commit_votes (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      commit_sha TEXT NOT NULL,
+      commit_author_github TEXT,
+      voter_id TEXT NOT NULL,
+      rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (voter_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE (project_id, commit_sha, voter_id)
+    )
+  `);
+  // Migration: add commit_author_github if missing (existing deployments)
+  await pool.query(`
+    ALTER TABLE commit_votes ADD COLUMN IF NOT EXISTS commit_author_github TEXT
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_cv_project_sha ON commit_votes(project_id, commit_sha)
+  `);
+
+  // Certificates — one per (user, project), snapshot at time of issuance
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS certificates (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      trigger_type TEXT NOT NULL,
+      was_creator BOOLEAN NOT NULL DEFAULT FALSE,
+      issued_at TIMESTAMPTZ DEFAULT NOW(),
+      payload JSONB NOT NULL,
+      UNIQUE (user_id, project_id)
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_certificates_user ON certificates(user_id, issued_at DESC)
+  `);
+
+  // Mock commits table — stores fake commit metadata for mock projects (no GitHub token needed)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS mock_commits (
+      sha TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      author_github TEXT NOT NULL,
+      message TEXT NOT NULL,
+      date TIMESTAMPTZ NOT NULL,
+      avatar_url TEXT
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_mock_commits_project ON mock_commits(project_id, date DESC)
   `);
 
   console.log('Database initialized');
@@ -623,7 +684,7 @@ const projectDb = {
     let row;
     if (userId) {
       const { rows } = await pool.query(
-        `SELECT p.*, pm.role FROM projects p
+        `SELECT p.*, pm.role, pm.membership_status AS member_status FROM projects p
          LEFT JOIN project_members pm ON p.id = pm.project_id AND pm.user_id = $2
          WHERE p.id = $1`,
         [id, userId]
@@ -644,7 +705,8 @@ const projectDb = {
       recruitmentOpen: Boolean(row.recruitment_open),
       githubRepo: row.github_repo || null,
       projectType: row.project_type,
-      role: row.role || null
+      role: row.role || null,
+      memberStatus: row.member_status || null
     };
   },
 
@@ -725,6 +787,18 @@ const memberDb = {
       [projectId, userId]
     );
     return rows.length > 0;
+  },
+
+  // Get active software projects where user is a non-creator member (used for unlink check)
+  async getActiveSoftwareProjectsAsMember(userId) {
+    const { rows } = await pool.query(
+      `SELECT p.id, p.name FROM project_members pm
+       JOIN projects p ON pm.project_id = p.id
+       WHERE pm.user_id = $1 AND pm.membership_status = 'active' AND pm.role != 'creator'
+       AND p.project_status = 'active' AND p.project_type = 'software'`,
+      [userId]
+    );
+    return rows;
   },
 
   // Get all members of a project (active members only)
@@ -1073,14 +1147,15 @@ const kickVoteDb = {
     return rows[0] || null;
   },
 
-  // Get all votes for a project (open + closed), with ballot counts
+  // Get all votes for a project (open + closed), with weighted ballot sums
   async getVotesForProject(projectId) {
     const { rows } = await pool.query(
       `SELECT kv.*,
          u.username as target_username,
          ui.username as initiator_username,
-         COUNT(CASE WHEN kvb.ballot = 'yes' THEN 1 END) as yes_count,
-         COUNT(CASE WHEN kvb.ballot = 'no' THEN 1 END) as no_count,
+         COALESCE(SUM(CASE WHEN kvb.ballot = 'yes' THEN kvb.weight ELSE 0 END), 0) as yes_weight,
+         COALESCE(SUM(CASE WHEN kvb.ballot = 'no' THEN kvb.weight ELSE 0 END), 0) as no_weight,
+         COALESCE(SUM(kvb.weight), 0) as total_weight,
          COUNT(kvb.id) as total_voted
        FROM kick_votes kv
        JOIN users u ON kv.target_user_id = u.id
@@ -1094,14 +1169,15 @@ const kickVoteDb = {
     return rows;
   },
 
-  // Get a single vote by ID with ballot counts
+  // Get a single vote by ID with weighted ballot sums
   async findById(voteId) {
     const { rows } = await pool.query(
       `SELECT kv.*,
          u.username as target_username,
          ui.username as initiator_username,
-         COUNT(CASE WHEN kvb.ballot = 'yes' THEN 1 END) as yes_count,
-         COUNT(CASE WHEN kvb.ballot = 'no' THEN 1 END) as no_count,
+         COALESCE(SUM(CASE WHEN kvb.ballot = 'yes' THEN kvb.weight ELSE 0 END), 0) as yes_weight,
+         COALESCE(SUM(CASE WHEN kvb.ballot = 'no' THEN kvb.weight ELSE 0 END), 0) as no_weight,
+         COALESCE(SUM(kvb.weight), 0) as total_weight,
          COUNT(kvb.id) as total_voted
        FROM kick_votes kv
        JOIN users u ON kv.target_user_id = u.id
@@ -1114,14 +1190,14 @@ const kickVoteDb = {
     return rows[0] || null;
   },
 
-  // Cast or update a ballot (upsert)
-  async castBallot(voteId, voterUserId, ballot) {
+  // Cast or update a ballot (upsert), weight stored for weighted threshold check
+  async castBallot(voteId, voterUserId, ballot, weight = 1) {
     const id = require('crypto').randomUUID();
     await pool.query(
-      `INSERT INTO kick_vote_ballots (id, vote_id, voter_user_id, ballot)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (vote_id, voter_user_id) DO UPDATE SET ballot = $4, cast_at = NOW()`,
-      [id, voteId, voterUserId, ballot]
+      `INSERT INTO kick_vote_ballots (id, vote_id, voter_user_id, ballot, weight)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (vote_id, voter_user_id) DO UPDATE SET ballot = $4, weight = $5, cast_at = NOW()`,
+      [id, voteId, voterUserId, ballot, weight]
     );
   },
 
@@ -1409,6 +1485,133 @@ const notificationDb = {
   }
 };
 
+// Commit vote database operations
+const commitVoteDb = {
+  // Upsert: cast or update a rating for a commit (commitAuthorGithub stored for leaderboard)
+  async upsert(projectId, sha, voterId, rating, commitAuthorGithub) {
+    const id = crypto.randomUUID();
+    const { rows } = await pool.query(
+      `INSERT INTO commit_votes (id, project_id, commit_sha, commit_author_github, voter_id, rating)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (project_id, commit_sha, voter_id)
+       DO UPDATE SET rating = EXCLUDED.rating, commit_author_github = EXCLUDED.commit_author_github, updated_at = NOW()
+       RETURNING *`,
+      [id, projectId, sha, commitAuthorGithub || null, voterId, rating]
+    );
+    return rows[0];
+  },
+
+  // Remove a vote (toggle-off)
+  async remove(projectId, sha, voterId) {
+    await pool.query(
+      `DELETE FROM commit_votes WHERE project_id=$1 AND commit_sha=$2 AND voter_id=$3`,
+      [projectId, sha, voterId]
+    );
+  },
+
+  // Get avg rating + count per sha for a list of shas
+  async getAverages(projectId, shas) {
+    if (!shas.length) return {};
+    const { rows } = await pool.query(
+      `SELECT commit_sha, AVG(rating)::numeric(3,1) AS avg_rating, COUNT(*)::int AS vote_count
+       FROM commit_votes
+       WHERE project_id = $1 AND commit_sha = ANY($2::text[])
+       GROUP BY commit_sha`,
+      [projectId, shas]
+    );
+    const map = {};
+    rows.forEach(r => { map[r.commit_sha] = { avg: parseFloat(r.avg_rating), count: r.vote_count }; });
+    return map;
+  },
+
+  // Leaderboard: sum of ratings per commit author (GitHub username), normalized to 100 pts total.
+  // Returns array: [{ githubUsername, score, commits, avgRating, normalizedWeight }]
+  // normalizedWeight is 0-100 float, all members sum to 100.
+  async getLeaderboard(projectId) {
+    const { rows } = await pool.query(
+      `SELECT commit_author_github AS github_username,
+              COUNT(DISTINCT commit_sha)::int AS commits,
+              SUM(rating)::numeric AS total_rating,
+              AVG(rating)::numeric(3,1) AS avg_rating
+       FROM commit_votes
+       WHERE project_id = $1 AND commit_author_github IS NOT NULL
+       GROUP BY commit_author_github
+       ORDER BY total_rating DESC`,
+      [projectId]
+    );
+    const totalScore = rows.reduce((sum, r) => sum + parseFloat(r.total_rating), 0);
+    return rows.map(r => ({
+      githubUsername: r.github_username,
+      commits: r.commits,
+      avgRating: parseFloat(r.avg_rating),
+      score: parseFloat(r.total_rating),
+      // weight as share of 100; if no votes at all, returns 0 for everyone
+      normalizedWeight: totalScore > 0 ? (parseFloat(r.total_rating) / totalScore) * 100 : 0
+    }));
+  },
+
+  // Get normalized weight (0-100) for a single GitHub username in a project.
+  // Used by kick ballot to determine voter's influence.
+  async getWeight(projectId, githubUsername) {
+    const leaderboard = await this.getLeaderboard(projectId);
+    const entry = leaderboard.find(e => e.githubUsername === githubUsername);
+    return entry ? entry.normalizedWeight : 0;
+  },
+
+  // Get the current user's votes for a list of shas
+  async getUserVotes(projectId, voterId, shas) {
+    if (!shas.length) return {};
+    const { rows } = await pool.query(
+      `SELECT commit_sha, rating FROM commit_votes
+       WHERE project_id=$1 AND voter_id=$2 AND commit_sha = ANY($3::text[])`,
+      [projectId, voterId, shas]
+    );
+    const map = {};
+    rows.forEach(r => { map[r.commit_sha] = r.rating; });
+    return map;
+  }
+};
+
+const certificateDb = {
+  // Insert certificate — silently skip if one already exists for (user, project)
+  async create(userId, projectId, triggerType, wasCreator, payload) {
+    const id = crypto.randomUUID();
+    await pool.query(
+      `INSERT INTO certificates (id, user_id, project_id, trigger_type, was_creator, payload)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (user_id, project_id) DO NOTHING`,
+      [id, userId, projectId, triggerType, wasCreator, JSON.stringify(payload)]
+    );
+    return id;
+  },
+
+  // Get all certificates for a user (newest first), without heavy payload
+  async getByUser(userId) {
+    const { rows } = await pool.query(
+      `SELECT id, project_id, trigger_type, was_creator, issued_at,
+              payload->>'projectName' AS project_name,
+              payload->>'username' AS username,
+              (
+                SELECT ROUND(AVG((elem->>'rating')::numeric), 1)
+                FROM jsonb_array_elements(payload->'timeline') AS elem
+                WHERE elem->>'rating' IS NOT NULL
+              ) AS avg_rating
+       FROM certificates WHERE user_id = $1 ORDER BY issued_at DESC`,
+      [userId]
+    );
+    return rows;
+  },
+
+  // Get single certificate by ID
+  async findById(certId) {
+    const { rows } = await pool.query(
+      `SELECT * FROM certificates WHERE id = $1`,
+      [certId]
+    );
+    return rows[0] || null;
+  }
+};
+
 module.exports = {
   pool,
   initDatabase,
@@ -1423,5 +1626,7 @@ module.exports = {
   githubDb,
   kickVoteDb,
   healthReadDb,
-  notificationDb
+  commitVoteDb,
+  notificationDb,
+  certificateDb
 };

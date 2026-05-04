@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "start": "node ./bin/www",
+    "seed-mock": "node scripts/seed-mock.js",
+    "reset-mock": "node scripts/reset-mock.js",
     "test": "jest --runInBand --forceExit",
     "test:unit": "jest --runInBand --forceExit __tests__/unit",
     "test:integration": "jest --runInBand --forceExit __tests__/integration"

@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const { projectDb, userDb, memberDb, joinRequestDb, joinRequestMessageDb, projectMessageDb, projectTodoDb, githubDb, kickVoteDb, healthReadDb, notificationDb, pool } = require('../models/database');
+const { projectDb, userDb, memberDb, joinRequestDb, joinRequestMessageDb, projectMessageDb, projectTodoDb, githubDb, kickVoteDb, healthReadDb, notificationDb, commitVoteDb, pool } = require('../models/database');
 const { encrypt, decrypt } = require('../utils/encryption');
 const { sendCollaboratorInvite, createGithubRepo, removeGithubCollaborator, resolveGithubUsername } = require('./githubRoutes');
+const { triggerForMember, triggerForAllActiveMembers } = require('../services/certificateBuilder');
 const {
   createProjectValidation,
   updateProjectValidation,
@@ -19,7 +20,10 @@ const {
   paramUserIdValidation,
   healthReadValidation,
   createTodoValidation,
-  paramTodoIdValidation
+  paramTodoIdValidation,
+  commitVoteValidation,
+  commitShasValidation,
+  paramCommitShaValidation
 } = require('../middleware/validators');
 
 // Middleware: Check if user is authenticated
@@ -329,12 +333,17 @@ router.patch('/:id/complete', requireAuth, paramIdValidation, async (req, res) =
       });
     }
 
-    // Notify all members except creator
+    // Notify all members + issue certificates
     if (project) {
       const allMembers = await memberDb.getProjectMembers(projectId);
       allMembers
         .filter(m => m.user_id !== req.session.userId)
         .forEach(m => notificationDb.create(m.user_id, 'project_completed', projectId, project.name).catch(() => {}));
+      // Also issue certificate for creator
+      triggerForMember(req.session.userId, projectId, 'completed').catch(() => {});
+      allMembers
+        .filter(m => m.user_id !== req.session.userId)
+        .forEach(m => triggerForMember(m.user_id, projectId, 'completed').catch(() => {}));
     }
 
     res.json({
@@ -366,10 +375,14 @@ router.delete('/:id', requireAuth, paramIdValidation, async (req, res) => {
       });
     }
 
-    // Notify all members except creator
+    // Notify all members + issue certificates (including creator)
     allMembers
       .filter(m => m.user_id !== req.session.userId)
       .forEach(m => notificationDb.create(m.user_id, 'project_deleted', projectId, project.name).catch(() => {}));
+    triggerForMember(req.session.userId, projectId, 'deleted').catch(() => {});
+    allMembers
+      .filter(m => m.user_id !== req.session.userId)
+      .forEach(m => triggerForMember(m.user_id, projectId, 'deleted').catch(() => {}));
 
     res.json({
       success: true,
@@ -701,6 +714,9 @@ router.delete('/:id/leave', requireAuth, paramIdValidation, async (req, res) => 
     // Remove member
     await memberDb.removeMember(projectId, userId);
 
+    // Issue certificate asynchronously — does not affect response
+    triggerForMember(userId, projectId, 'left').catch(() => {});
+
     res.json({
       success: true,
       message: 'You have left the project'
@@ -767,32 +783,56 @@ router.delete('/:id/moderators/:memberId', requireAuth, paramIdValidation, param
 
 // --- KICK VOTING ---
 
-// Helper: resolve a vote if threshold met or expired, returns updated status
+// Helper: resolve a vote if threshold met or expired, returns updated status.
+// Uses weighted ballots: yes_weight / total_possible_weight >= 0.70.
+// For research projects (no github_repo), each eligible member has equal weight (1).
+// For software projects, weight comes from commit ratings (stored on ballot cast).
+// total_possible_weight = sum of all eligible voters' weights (including those who haven't voted).
 async function resolveVoteIfNeeded(vote, project) {
   if (vote.status !== 'open') return vote;
 
   const now = new Date();
   const expired = new Date(vote.expires_at) < now;
-  const totalMembers = await pool.query(
-    `SELECT COUNT(*) as count FROM project_members
-     WHERE project_id = $1 AND membership_status = 'active' AND user_id != $2`,
+
+  // Get all eligible voters (active members except target)
+  const eligibleRes = await pool.query(
+    `SELECT pm.user_id, u.github_username
+     FROM project_members pm
+     JOIN users u ON pm.user_id = u.id
+     WHERE pm.project_id = $1 AND pm.membership_status = 'active' AND pm.user_id != $2`,
     [vote.project_id, vote.target_user_id]
   );
-  const total = Number(totalMembers.rows[0].count);
-  const yesCount = Number(vote.yes_count || 0);
+  const eligible = eligibleRes.rows;
+  const totalEligible = eligible.length;
+  if (totalEligible === 0) return vote;
 
-  const threshold = total > 0 ? yesCount / total : 0;
-  const passed = total > 0 && threshold >= 0.70;
+  let totalPossibleWeight;
+  const yesWeight = Number(vote.yes_weight || 0);
+
+  if (project.projectType === 'software' && project.github_repo) {
+    // Weighted: sum of all eligible members' leaderboard weights
+    const leaderboard = await commitVoteDb.getLeaderboard(vote.project_id);
+    const weightMap = {};
+    leaderboard.forEach(e => { weightMap[e.githubUsername] = e.normalizedWeight; });
+    totalPossibleWeight = eligible.reduce((sum, m) => sum + (weightMap[m.github_username] || 0), 0);
+    // If nobody has any commit ratings yet, fall back to equal weight
+    if (totalPossibleWeight === 0) totalPossibleWeight = totalEligible;
+  } else {
+    // Research project: each member weight = 1
+    totalPossibleWeight = totalEligible;
+  }
+
+  const threshold = totalPossibleWeight > 0 ? yesWeight / totalPossibleWeight : 0;
+  const passed = threshold >= 0.70;
 
   if (passed) {
     await kickVoteDb.resolve(vote.id, 'passed');
-    // Execute the kick
     const kickResult = await memberDb.kickMember(vote.project_id, vote.target_user_id);
     if (kickResult && project.projectType === 'software' && project.github_repo && kickResult.githubId) {
       await removeGithubCollaborator(kickResult.githubId, project.github_repo, project.creator_id);
     }
-    // Notify kicked user
     notificationDb.create(vote.target_user_id, 'kicked', vote.project_id, project.name).catch(() => {});
+    triggerForMember(vote.target_user_id, vote.project_id, 'kicked').catch(() => {});
     return { ...vote, status: 'passed' };
   }
 
@@ -926,7 +966,25 @@ router.post('/:id/kick-votes/:voteId/ballot', requireAuth, paramIdValidation, pa
       return res.status(400).json({ success: false, message: 'This vote has expired' });
     }
 
-    await kickVoteDb.castBallot(vote.id, userId, ballot);
+    // Determine voter's weight: leaderboard share for software projects, 1 for research
+    let voterWeight = 1;
+    if (project.projectType === 'software' && project.github_repo) {
+      const voterUser = await pool.query(`SELECT github_username FROM users WHERE id = $1`, [userId]);
+      const githubUsername = voterUser.rows[0]?.github_username;
+      if (githubUsername) {
+        voterWeight = await commitVoteDb.getWeight(projectId, githubUsername);
+        // If voter has no commit ratings yet, give them equal share as fallback
+        if (voterWeight === 0) {
+          const { rows: memberCount } = await pool.query(
+            `SELECT COUNT(*) as count FROM project_members WHERE project_id = $1 AND membership_status = 'active' AND user_id != $2`,
+            [projectId, vote.target_user_id]
+          );
+          voterWeight = 100 / Math.max(1, Number(memberCount.rows[0].count));
+        }
+      }
+    }
+
+    await kickVoteDb.castBallot(vote.id, userId, ballot, voterWeight);
 
     // Re-fetch with updated counts for early resolution check
     const updatedVote = await kickVoteDb.findById(vote.id);
@@ -1047,11 +1105,28 @@ router.get('/:id/requests/:requestId/messages', requireAuth, paramIdValidation, 
 // ========================================
 
 // Middleware: allow active project members only (creator/mod/member)
+// Blocks left/kicked users and non-active projects (completed/deleted)
+// Read-only: any past or current member can access (for viewing history on past projects)
+async function requireMemberAny(req, res, next) {
+  try {
+    const project = await projectDb.findById(req.params.id, req.session.userId);
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+    if (!project.role) return res.status(403).json({ success: false, message: 'Members only' });
+    next();
+  } catch (err) {
+    console.error('requireMemberAny error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+}
+
+// Write actions: only active members of an active project
 async function requireActiveMember(req, res, next) {
   try {
     const project = await projectDb.findById(req.params.id, req.session.userId);
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
     if (!project.role) return res.status(403).json({ success: false, message: 'Members only' });
+    if (project.memberStatus !== 'active') return res.status(403).json({ success: false, message: 'You are no longer an active member of this project' });
+    if (project.status !== 'active') return res.status(403).json({ success: false, message: 'This project is no longer active' });
     next();
   } catch (err) {
     console.error('requireActiveMember error:', err);
@@ -1072,7 +1147,7 @@ router.post('/:id/messages', requireAuth, paramIdValidation, messageContentValid
 });
 
 // GET: Fetch project chat messages
-router.get('/:id/messages', requireAuth, paramIdValidation, requireActiveMember, async (req, res) => {
+router.get('/:id/messages', requireAuth, paramIdValidation, requireMemberAny, async (req, res) => {
   try {
     const rows = await projectMessageDb.getByProjectId(req.params.id);
     const messages = rows.map(m => ({
@@ -1231,7 +1306,7 @@ router.delete('/:id/health-reads/:issueKey', requireAuth, paramIdValidation, req
 // ========================================
 
 // GET: List all todos for a project (active members only)
-router.get('/:id/todos', requireAuth, paramIdValidation, requireActiveMember, async (req, res) => {
+router.get('/:id/todos', requireAuth, paramIdValidation, requireMemberAny, async (req, res) => {
   try {
     const todos = await projectTodoDb.getByProjectId(req.params.id);
     res.json({ success: true, todos });
@@ -1332,6 +1407,77 @@ router.delete('/:id/todos/:todoId', requireAuth, paramIdValidation, paramTodoIdV
     res.json({ success: true });
   } catch (err) {
     console.error('Delete todo error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ========================================
+// COMMIT VOTES
+
+// GET: Fetch avg ratings + user's votes for a list of commit SHAs
+router.get('/:id/commit-votes', requireAuth, paramIdValidation, commitShasValidation, requireMemberAny, async (req, res) => {
+  try {
+    const projectId = req.params.id;
+    const shas = req.query.shas.split(',').map(s => s.trim()).filter(Boolean).slice(0, 50);
+    if (!shas.length) return res.json({ success: true, data: { averages: {}, userVotes: {} } });
+
+    const [averages, userVotes] = await Promise.all([
+      commitVoteDb.getAverages(projectId, shas),
+      commitVoteDb.getUserVotes(projectId, req.session.userId, shas)
+    ]);
+
+    res.json({ success: true, data: { averages, userVotes } });
+  } catch (err) {
+    console.error('Get commit votes error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET: Leaderboard for a project (active members only)
+router.get('/:id/leaderboard', requireAuth, paramIdValidation, requireMemberAny, async (req, res) => {
+  try {
+    const leaderboard = await commitVoteDb.getLeaderboard(req.params.id);
+    res.json({ success: true, data: { leaderboard } });
+  } catch (err) {
+    console.error('Get leaderboard error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST: Cast or update a commit vote
+router.post('/:id/commit-votes', requireAuth, paramIdValidation, commitVoteValidation, requireActiveMember, async (req, res) => {
+  try {
+    const projectId = req.params.id;
+    const { sha, rating, commitAuthor } = req.body;
+
+    await commitVoteDb.upsert(projectId, sha, req.session.userId, rating, commitAuthor || null);
+
+    // Return updated avg for instant UI feedback
+    const averages = await commitVoteDb.getAverages(projectId, [sha]);
+    const info = averages[sha] || { avg: rating, count: 1 };
+
+    res.json({ success: true, data: { sha, rating, avg: info.avg, count: info.count } });
+  } catch (err) {
+    console.error('Cast commit vote error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// DELETE: Remove a commit vote (toggle-off)
+router.delete('/:id/commit-votes/:sha', requireAuth, paramIdValidation, paramCommitShaValidation, requireActiveMember, async (req, res) => {
+  try {
+    const projectId = req.params.id;
+    const sha = req.params.sha;
+
+    await commitVoteDb.remove(projectId, sha, req.session.userId);
+
+    // Return updated avg so UI reflects removal
+    const averages = await commitVoteDb.getAverages(projectId, [sha]);
+    const info = averages[sha] || { avg: null, count: 0 };
+
+    res.json({ success: true, data: { sha, avg: info.avg, count: info.count } });
+  } catch (err) {
+    console.error('Remove commit vote error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

@@ -19,6 +19,7 @@ var authRouter = require('./src/routes/authRoutes');
 var projectRouter = require('./src/routes/projectRoutes');
 var githubRouter = require('./src/routes/githubRoutes');
 var notificationRouter = require('./src/routes/notificationRoutes');
+var certificateRouter = require('./src/routes/certificateRoutes');
 
 var app = express();
 
@@ -117,6 +118,10 @@ app.use('/api/github', githubRouter);
 // Notification routes
 app.use('/api/notifications', apiLimiter);
 app.use('/api/notifications', notificationRouter);
+
+// Certificate routes
+app.use('/api/certificates', apiLimiter);
+app.use('/api/certificates', certificateRouter);
 
 // Redirect root to appropriate page based on auth status
 app.get('/', (req, res) => {

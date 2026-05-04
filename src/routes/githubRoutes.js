@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const router = express.Router();
-const { githubDb, projectDb, memberDb, userDb } = require('../models/database');
+const { githubDb, projectDb, memberDb, pool, commitVoteDb } = require('../models/database');
 const { encrypt, decrypt } = require('../utils/encryption');
 
 // Auth middleware - require logged in user
@@ -172,6 +172,36 @@ router.get('/commits/:projectId', requireAuth, async (req, res) => {
 
     if (!project.github_repo) {
       return res.json({ success: true, commits: [], totalCount: 0 });
+    }
+
+    // Mock bypass: if repo name contains "mock", serve commits from mock_commits table
+    if (project.github_repo.includes('mock')) {
+      const page = parseInt(req.query.page) || 1;
+      const perPage = 5;
+      const { rows: mockCommits } = await pool.query(
+        `SELECT mc.sha, mc.author_github, mc.message, mc.date,
+                u.username AS author
+         FROM mock_commits mc
+         LEFT JOIN users u ON u.github_username = mc.author_github
+         WHERE mc.project_id = $1
+         ORDER BY mc.date DESC`,
+        [project.id]
+      );
+      const paginated = mockCommits.slice((page - 1) * perPage, page * perPage);
+      return res.json({
+        success: true,
+        commits: paginated.map(c => ({
+          sha: c.sha,
+          message: c.message,
+          author: c.author_github,
+          githubUsername: c.author_github,
+          date: c.date,
+          url: `https://github.com/${project.github_repo}/commit/${c.sha}`,
+          avatar: null,
+        })),
+        page,
+        hasNextPage: mockCommits.length > page * perPage
+      });
     }
 
     // Use the requesting user's own GitHub token (they are a collaborator on the repo)
@@ -436,14 +466,19 @@ router.post('/unlink', requireAuth, async (req, res) => {
     return res.status(400).json({ success: false, message: 'No GitHub account linked' });
   }
 
-  // Block unlink if user is creator of any active software project
-  const creatorProjects = await projectDb.getActiveSoftwareProjectsAsCreator(req.session.userId);
-  if (creatorProjects.length > 0) {
-    const names = creatorProjects.map(p => p.name).join(', ');
+  // Block unlink if user has any active software project membership (creator or member)
+  const [creatorProjects, memberProjects] = await Promise.all([
+    projectDb.getActiveSoftwareProjectsAsCreator(req.session.userId),
+    memberDb.getActiveSoftwareProjectsAsMember(req.session.userId)
+  ]);
+
+  const blockedProjects = [...creatorProjects, ...memberProjects];
+  if (blockedProjects.length > 0) {
+    const names = blockedProjects.map(p => p.name).join(', ');
     return res.status(400).json({
       success: false,
-      message: `You are the creator of active software project(s): ${names}. Complete or delete these projects before unlinking GitHub.`,
-      blockedByCreator: true
+      message: `You are an active member of software project(s): ${names}. Leave or complete these projects before unlinking GitHub.`,
+      blockedProjects: blockedProjects.map(p => ({ id: p.id, name: p.name }))
     });
   }
 

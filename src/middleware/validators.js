@@ -1,4 +1,4 @@
-const { body, param, validationResult } = require('express-validator');
+const { body, param, query, validationResult } = require('express-validator');
 
 // Validation error handler middleware
 const handleValidationErrors = (req, res, next) => {
@@ -341,6 +341,23 @@ const paramTodoIdValidation = [
   handleValidationErrors
 ];
 
+const commitVoteValidation = [
+  body('sha').trim().notEmpty().isLength({ max: 40 }).withMessage('Invalid commit SHA'),
+  body('rating').isInt({ min: 1, max: 5 }).withMessage('Rating must be 1-5'),
+  body('commitAuthor').optional().trim().isLength({ max: 100 }).escape().withMessage('Invalid commit author'),
+  handleValidationErrors
+];
+
+const commitShasValidation = [
+  query('shas').notEmpty().withMessage('shas query param required'),
+  handleValidationErrors
+];
+
+const paramCommitShaValidation = [
+  param('sha').trim().notEmpty().isLength({ max: 40 }).withMessage('Invalid commit SHA'),
+  handleValidationErrors
+];
+
 module.exports = {
   registerValidation,
   loginValidation,
@@ -360,5 +377,8 @@ module.exports = {
   paramUserIdValidation,
   healthReadValidation,
   createTodoValidation,
-  paramTodoIdValidation
+  paramTodoIdValidation,
+  commitVoteValidation,
+  commitShasValidation,
+  paramCommitShaValidation
 };

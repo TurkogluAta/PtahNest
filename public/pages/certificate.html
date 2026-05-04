@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PtahNest - Certificate</title>
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../stylesheets/style.css">
+</head>
+
+<body>
+    <header class="app-header">
+        <div class="header-content">
+            <div class="header-left">
+                <a href="/pages/profile.html" class="header-logo">PtahNest</a>
+            </div>
+            <nav class="main-nav" id="mainNav"></nav>
+            <div class="header-icons" id="headerIcons"></div>
+        </div>
+    </header>
+
+    <main class="main-content loaded">
+        <div id="certLoading" class="cert-loading">
+            <p class="text-muted">Loading certificate...</p>
+        </div>
+
+        <div id="certError" class="cert-error" style="display:none;">
+            <p class="text-muted">Certificate not found.</p>
+            <a href="/pages/profile.html" class="btn btn-secondary cert-error-back">Back to Profile</a>
+        </div>
+
+        <div id="certPage" class="certificate-page" style="display:none;">
+            <div class="cert-actions">
+                <a href="/pages/profile.html" class="btn btn-secondary">← Back</a>
+                <button class="btn btn-primary" onclick="downloadAsPNG()">Download PNG</button>
+            </div>
+            <div id="certContainer" class="cert-container"></div>
+        </div>
+    </main>
+
+    <script src="../javascripts/navbar.js"></script>
+    <script src="../javascripts/certificate.js"></script>
+</body>
+
+</html>

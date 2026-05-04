@@ -491,6 +491,7 @@ body::after {
     font-weight: 700;
     color: var(--text-1);
     flex-shrink: 0;
+    text-decoration: none;
 }
 
 .header-right {
@@ -2254,8 +2255,8 @@ textarea.input-field {
 
 .commit-rating-stars {
     display: inline-flex;
-    gap: 1px;
-    font-size: 0.85rem;
+    gap: 2px;
+    font-size: 1.35rem;
     line-height: 1;
 }
 
@@ -2264,6 +2265,19 @@ textarea.input-field {
     opacity: 0.4;
 }
 
+/* Community average — dim gold (lower opacity) */
+.commit-rating-star.filled-avg {
+    color: #f5c518;
+    opacity: 0.45;
+}
+
+/* Current user's own vote — bright gold */
+.commit-rating-star.filled-mine {
+    color: #f5c518;
+    opacity: 1;
+}
+
+/* Legacy — kept for fallback */
 .commit-rating-star.filled {
     color: #f5c518;
     opacity: 1;
@@ -2277,12 +2291,60 @@ textarea.input-field {
     opacity: 1;
 }
 
-.commit-rating-value {
-    font-size: 0.7rem;
-    color: var(--text-2);
+.commit-rating-meta {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.3rem;
+    font-size: 0.72rem;
     font-variant-numeric: tabular-nums;
-    min-width: 1.8em;
-    text-align: right;
+    line-height: 1;
+}
+
+/* Highlight when this is the current user's own vote */
+.commit-rating-value-mine {
+    color: #f5c518;
+    font-weight: 700;
+    font-size: 0.85rem;
+}
+
+.commit-rating-sep {
+    color: var(--text-3);
+    opacity: 0.6;
+}
+
+.commit-rating-avg {
+    color: var(--text-3);
+}
+
+.commit-rating-count {
+    color: var(--text-3);
+    opacity: 0.7;
+    font-size: 0.68rem;
+}
+
+/* Interactive star — clickable, hover-able */
+.commit-rating-star.interactive {
+    cursor: pointer;
+    transition: color 0.1s, opacity 0.1s, transform 0.1s;
+}
+
+.commit-rating-star.interactive:hover {
+    transform: scale(1.15);
+}
+
+/* Hover preview — fill stars up to hovered index */
+.commit-rating-star.preview {
+    color: #f5c518;
+    opacity: 1;
+}
+
+/* Disabled — can't vote (own commit, joined after, etc.) */
+.commit-rating-star.disabled {
+    cursor: not-allowed;
+}
+
+.commit-rating-disabled {
+    cursor: help;
 }
 
 .commit-author {
@@ -4465,3 +4527,207 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
         max-height: 220px;
     }
 }
+
+/* =========================================================
+   CERTIFICATES
+   ========================================================= */
+
+.certificate-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.75rem;
+    padding: 0.5rem 0;
+}
+
+.certificate-card {
+    display: block;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    padding: 1rem;
+    text-decoration: none;
+    color: var(--text-primary);
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.certificate-card:hover {
+    border-color: var(--accent-primary);
+    background: var(--bg-secondary);
+}
+
+.certificate-card-name {
+    font-size: 0.875rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.certificate-card-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+}
+
+.certificate-trigger-badge {
+    font-weight: 600;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.certificate-card-date {
+    color: var(--text-muted);
+}
+
+.certificate-card-rating {
+    color: #e3b341;
+    font-weight: 600;
+}
+
+.cert-creator-star {
+    color: #9b59b6;
+    margin-right: 4px;
+}
+
+.cert-trigger-completed { color: #3fb950; }
+.cert-trigger-left      { color: #8b949e; }
+.cert-trigger-kicked    { color: #f85149; }
+.cert-trigger-deleted   { color: #8b949e; }
+.cert-trigger-default   { color: #8b949e; }
+
+.certificate-grid-empty {
+    padding: 0.5rem 0;
+    font-size: 0.875rem;
+}
+
+.certs-pagination {
+    margin-top: 0.75rem;
+}
+
+/* Extra top spacing for profile page lower cards */
+.profile-card-spaced {
+    margin-top: 1.5rem;
+}
+
+/* Dev tools panel (localhost only) */
+.dev-tools-card {
+    margin-top: 1.5rem;
+    border-color: #f0883e44;
+}
+
+.dev-tools-title {
+    color: #f0883e;
+}
+
+.dev-tools-buttons {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    padding: 0.5rem 0;
+}
+
+.dev-tools-note {
+    font-size: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+/* Commit history disclaimer note */
+.commit-history-note {
+    font-size: 0.72rem;
+    margin: -0.5rem 0 0.75rem;
+    text-align: center;
+    line-height: 1.5;
+}
+
+/* Status banner (completed/deleted/left/kicked) */
+.project-status-banner {
+    padding: 1.75rem 1.5rem;
+}
+
+.project-status-banner p {
+    margin: 0;
+}
+
+/* Certificate view page */
+.certificate-page {
+    max-width: 960px;
+    margin: 0 auto;
+}
+
+.cert-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+}
+
+.cert-container {
+    width: 100%;
+    overflow-x: auto;
+    border-radius: 10px;
+    border: 1px solid var(--border-primary);
+}
+
+.cert-container svg {
+    border-radius: 10px;
+}
+
+.cert-loading,
+.cert-error {
+    text-align: center;
+    padding: 3rem 1rem;
+}/* Verify certificate page */
+.verify-page-body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+}
+
+.verify-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-primary);
+    border-radius: 12px;
+    padding: 2.5rem 3rem;
+    max-width: 480px;
+    width: 90%;
+    text-align: center;
+}
+
+.verify-icon { font-size: 3rem; margin-bottom: 1rem; }
+.verify-title { font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem; }
+.verify-sub { font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1.5rem; }
+
+.verify-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border-primary);
+    font-size: 0.875rem;
+}
+.verify-row:last-child { border-bottom: none; }
+.verify-label { color: var(--text-muted); }
+.verify-value { color: var(--text-primary); font-weight: 500; }
+
+.verify-badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+}
+
+.verify-footer { margin-top: 1.5rem; font-size: 0.75rem; color: var(--border-secondary); }
+.verify-footer a { color: var(--accent-primary); text-decoration: none; }
+
+.verify-creator-value { color: #9b59b6; }
+
+.github-icon-dim { opacity: 0.8; }
+.profile-info-row-last { border-bottom: none; padding: 0; }
+.cert-error-back { margin-top: 1rem; }

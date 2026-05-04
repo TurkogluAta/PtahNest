@@ -7,6 +7,7 @@ const PROJECT_TYPES = {
 // State
 let projects = [];
 let githubLinked = false;
+let certMap = {}; // project_id → certificate (avg_rating, was_creator, id)
 
 // Pagination state
 const PROJECTS_PER_PAGE = 4;
@@ -30,17 +31,25 @@ function checkEditParam() {
 // Fetch projects on page load
 async function fetchProjects() {
     try {
-        const response = await fetch('/api/projects', {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-        });
+        const [projRes, certRes] = await Promise.all([
+            fetch('/api/projects', { headers: { 'Content-Type': 'application/json' } }),
+            fetch('/api/certificates/me')
+        ]);
 
-        if (!response.ok) {
-            throw new Error('Failed to fetch projects');
+        if (!projRes.ok) throw new Error('Failed to fetch projects');
+
+        const data = await projRes.json();
+        projects = data.projects;
+
+        // Build project_id → cert map for past tab rating display
+        if (certRes.ok) {
+            const certData = await certRes.json();
+            if (certData.success) {
+                certMap = {};
+                certData.data.certificates.forEach(c => { certMap[c.project_id] = c; });
+            }
         }
 
-        const data = await response.json();
-        projects = data.projects;
         renderProjects();
 
         // Auto-open edit modal if redirected from project detail page
@@ -98,6 +107,14 @@ function renderProjectCard(project) {
            </div>`
         : '';
 
+    // Rating badge from certificate (past tab only)
+    const isPast = ['completed', 'left', 'kicked', 'deleted'].includes(project.status);
+    const cert = isPast ? certMap[project.id] : null;
+    const avgRating = cert && cert.avg_rating ? parseFloat(cert.avg_rating) : null;
+    const ratingHTML = avgRating != null
+        ? `<span class="meta-inline certificate-card-rating">★ ${avgRating.toFixed(1)}</span>`
+        : '';
+
     return `
         <div class="card card-hover card-bottom-gap card-clickable" onclick="window.location.href='/pages/project-detail.html?id=${project.id}'">
             <div class="project-card-header">
@@ -119,6 +136,7 @@ function renderProjectCard(project) {
                     <img src="../pictures/icons/members.svg" width="16">
                     ${project.members} Members
                 </span>
+                ${ratingHTML}
             </div>
         </div>
     `;
