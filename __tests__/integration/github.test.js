@@ -105,7 +105,8 @@ describe('POST /api/github/unlink', () => {
 
     const res = await agent.post('/api/github/unlink');
     expect(res.status).toBe(400);
-    expect(res.body.blockedByCreator).toBe(true);
+    expect(res.body.blockedProjects).toBeDefined();
+    expect(res.body.blockedProjects.length).toBeGreaterThan(0);
   });
 
   test('should return 400 when no GitHub linked', async () => {
