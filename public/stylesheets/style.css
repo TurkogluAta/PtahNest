@@ -836,8 +836,8 @@ body::after {
 
 .project-card-header {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.4rem;
     margin-bottom: 1rem;
 }
 
@@ -1046,6 +1046,7 @@ body::after {
     font-family: inherit;
     cursor: pointer;
     transition: all 0.2s;
+    text-decoration: none;
 }
 
 .btn-primary {
@@ -1326,6 +1327,14 @@ textarea.input-field {
     color: var(--text-2);
     font-size: 0.75rem;
     font-weight: 500;
+    max-width: 200px;
+    overflow: hidden;
+}
+
+.repo-tag-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .repo-tag img {
@@ -4716,11 +4725,12 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
 
 .verify-badge {
     display: inline-block;
-    padding: 0.2rem 0.6rem;
+    padding: 0.2rem 0.6rem 0.2rem 0.6rem;
     border-radius: 4px;
     font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: 0.05em;
+    margin-right: -0.6rem;
 }
 
 .verify-footer { margin-top: 1.5rem; font-size: 0.75rem; color: var(--border-secondary); }

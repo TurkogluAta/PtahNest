@@ -130,7 +130,7 @@ function renderProjectCard(project) {
 
     // Repo badge for software projects with a linked GitHub repo
     const repoTagHTML = project.projectType === 'software' && project.githubRepo
-        ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14">${project.githubRepo}</span>`
+        ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14"><span class="repo-tag-name">${project.githubRepo}</span></span>`
         : '';
 
     const lookingForHTML = project.lookingFor && project.lookingFor.length > 0
@@ -145,15 +145,13 @@ function renderProjectCard(project) {
         <div class="card card-hover" onclick="openProjectModal('${project.id}')"
              style="cursor: pointer;">
             <div class="project-card-header">
-                <div>
-                    <div class="card-title">${project.name}</div>
-                    <div class="card-desc no-margin">${project.description}</div>
-                </div>
-                <div class="badge-group">
+                <div class="card-title">${project.name}</div>
+                <div class="badge-group" style="flex-wrap: wrap; margin-bottom: 0.5rem;">
                     ${repoTagHTML}
                     ${(() => { const t = PROJECT_TYPES[project.projectType] || PROJECT_TYPES.software; return `<span class="badge ${t.badgeClass}">${t.label}</span>`; })()}
                     <span class="badge badge-success">Recruiting</span>
                 </div>
+                <div class="card-desc no-margin">${project.description}</div>
             </div>
             ${tagsHTML}
             ${lookingForHTML}
@@ -177,25 +175,19 @@ function renderPagination(totalProjects) {
         return;
     }
 
-    let buttonsHTML = '';
+    const prevBtn = currentPage > 1
+        ? `<button class="pagination-btn" onclick="changePage(${currentPage - 1})">Previous</button>`
+        : `<button class="pagination-btn" disabled>Previous</button>`;
 
-    // Previous button
-    if (currentPage > 1) {
-        buttonsHTML += `<button class="pagination-btn" onclick="changePage(${currentPage - 1})">Previous</button>`;
-    }
+    const nextBtn = currentPage < totalPages
+        ? `<button class="pagination-btn" onclick="changePage(${currentPage + 1})">Next</button>`
+        : `<button class="pagination-btn" disabled>Next</button>`;
 
-    // Page numbers
-    for (let i = 1; i <= totalPages; i++) {
-        const activeClass = i === currentPage ? 'active' : '';
-        buttonsHTML += `<button class="pagination-btn ${activeClass}" onclick="changePage(${i})">${i}</button>`;
-    }
-
-    // Next button
-    if (currentPage < totalPages) {
-        buttonsHTML += `<button class="pagination-btn" onclick="changePage(${currentPage + 1})">Next</button>`;
-    }
-
-    paginationContainer.innerHTML = buttonsHTML;
+    paginationContainer.innerHTML = `
+        ${prevBtn}
+        <button class="pagination-btn active">${currentPage} / ${totalPages}</button>
+        ${nextBtn}
+    `;
 }
 
 // Change page
@@ -302,7 +294,7 @@ function openProjectModal(projectId) {
 
     // Repo badge for software projects with a linked GitHub repo
     const modalRepoTagHTML = project.projectType === 'software' && project.githubRepo
-        ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14">${project.githubRepo}</span>`
+        ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14"><span class="repo-tag-name">${project.githubRepo}</span></span>`
         : '';
 
     const lookingForHTML = project.lookingFor && project.lookingFor.length > 0

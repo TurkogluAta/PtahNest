@@ -90,7 +90,7 @@ async function fetchMembers() {
 function renderProjectHeader() {
     // Repo badge for software projects with a linked GitHub repo
     const repoTagHTML = project.projectType === 'software' && project.githubRepo
-        ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14">${project.githubRepo}</span>`
+        ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14"><span class="repo-tag-name">${project.githubRepo}</span></span>`
         : '';
 
     const headerHTML = `
@@ -761,10 +761,10 @@ function renderKickVoteCard(v, showCancel = false) {
         voteActions = `
         <div class="vote-actions-row">
             <button class="btn btn-primary btn-sm ${v.myBallot === 'yes' ? 'btn-active' : ''}" onclick="castBallot('${v.id}','yes')" ${voted ? 'disabled' : ''}>
-                Yes (${v.yes_count})
+                Yes (${Math.round(Number(v.yes_weight) || 0)}%)
             </button>
             <button class="btn btn-outline btn-sm ${v.myBallot === 'no' ? 'btn-active' : ''}" onclick="castBallot('${v.id}','no')" ${voted ? 'disabled' : ''}>
-                No (${v.no_count})
+                No (${Math.round(Number(v.no_weight) || 0)}%)
             </button>
             ${voted ? '<span class="text-muted vote-locked-label">Vote locked</span>' : ''}
             ${showCancel && currentUserRole === 'creator' ? `<button class="btn btn-outline btn-sm" onclick="cancelKickVote('${v.id}')">Cancel</button>` : ''}
@@ -781,9 +781,9 @@ function renderKickVoteCard(v, showCancel = false) {
                     </div>
                     <div class="kick-vote-row-meta">
                         ${isOpen ? `<span>Expires ${expiresIn}</span>` : ''}
-                        <span>Yes ${v.yes_count}</span>
-                        <span>No ${v.no_count}</span>
-                        <span>Voted ${v.total_voted ?? (v.yes_count + v.no_count)}</span>
+                        <span>Yes ${Math.round(Number(v.yes_weight) || 0)}%</span>
+                        <span>No ${Math.round(Number(v.no_weight) || 0)}%</span>
+                        <span>Voted ${v.total_voted ?? 0}</span>
                     </div>
                 </div>
                 ${statusBadge}

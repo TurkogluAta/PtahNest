@@ -46,7 +46,7 @@ function renderProjects(projects) {
     const projectsHTML = projects.map(project => {
         // Repo badge for software projects
         const repoTagHTML = project.projectType === 'software' && project.githubRepo
-            ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14">${project.githubRepo}</span>`
+            ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14"><span class="repo-tag-name">${project.githubRepo}</span></span>`
             : '';
 
         return `

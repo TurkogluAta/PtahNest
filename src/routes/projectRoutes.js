@@ -815,8 +815,6 @@ async function resolveVoteIfNeeded(vote, project) {
     const weightMap = {};
     leaderboard.forEach(e => { weightMap[e.githubUsername] = e.normalizedWeight; });
     totalPossibleWeight = eligible.reduce((sum, m) => sum + (weightMap[m.github_username] || 0), 0);
-    // If nobody has any commit ratings yet, fall back to equal weight
-    if (totalPossibleWeight === 0) totalPossibleWeight = totalEligible;
   } else {
     // Research project: each member weight = 1
     totalPossibleWeight = totalEligible;
@@ -973,14 +971,6 @@ router.post('/:id/kick-votes/:voteId/ballot', requireAuth, paramIdValidation, pa
       const githubUsername = voterUser.rows[0]?.github_username;
       if (githubUsername) {
         voterWeight = await commitVoteDb.getWeight(projectId, githubUsername);
-        // If voter has no commit ratings yet, give them equal share as fallback
-        if (voterWeight === 0) {
-          const { rows: memberCount } = await pool.query(
-            `SELECT COUNT(*) as count FROM project_members WHERE project_id = $1 AND membership_status = 'active' AND user_id != $2`,
-            [projectId, vote.target_user_id]
-          );
-          voterWeight = 100 / Math.max(1, Number(memberCount.rows[0].count));
-        }
       }
     }
 

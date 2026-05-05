@@ -27,6 +27,28 @@ async function fetchAuthorCommits(repo, githubUsername, accessToken) {
   return commits.sort((a, b) => new Date(a.date) - new Date(b.date));
 }
 
+// Fetch all commits for the repo across all authors (paginated, max 500)
+async function fetchAllProjectCommits(repo, accessToken) {
+  const commits = [];
+  const perPage = 100;
+  const maxPages = 5;
+  for (let page = 1; page <= maxPages; page++) {
+    const url = `https://api.github.com/repos/${repo}/commits?per_page=${perPage}&page=${page}`;
+    const res = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/vnd.github+json' }
+    });
+    if (!res.ok) break;
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) break;
+    data.forEach(c => commits.push({
+      sha: c.sha,
+      date: c.commit?.author?.date || c.commit?.committer?.date || null
+    }));
+    if (data.length < perPage) break;
+  }
+  return commits;
+}
+
 // Fetch all commits for the repo this month (for pie chart — all authors)
 async function fetchMonthlyCommits(repo, accessToken) {
   const now = new Date();
@@ -50,36 +72,49 @@ async function fetchMonthlyCommits(repo, accessToken) {
 // artificial past dates but votes are cast in real time, so time-based filtering
 // would always exclude all votes. Instead we use all current votes for every point,
 // which gives a meaningful "weight at time of certificate issue" view.
-async function buildWeightHistory(projectId, githubUsername, authorCommits) {
+async function buildWeightHistory(projectId, githubUsername, authorCommits, allProjectCommits) {
   if (!authorCommits.length) return [];
 
-  // Get all commit_votes for project grouped by author
+  // Get total star rating per sha across all authors
   const { rows: allVotes } = await pool.query(
-    `SELECT commit_author_github, SUM(rating)::float AS total_score
+    `SELECT commit_sha, commit_author_github, SUM(rating)::float AS score
      FROM commit_votes
      WHERE project_id = $1 AND commit_author_github IS NOT NULL
-     GROUP BY commit_author_github`,
+     GROUP BY commit_sha, commit_author_github`,
     [projectId]
   );
 
-  // Build author → score map from all current votes
-  const byAuthor = {};
+  // sha → { author → score }
+  const scoresBySha = {};
   for (const v of allVotes) {
-    byAuthor[v.commit_author_github] = Number(v.total_score);
+    if (!scoresBySha[v.commit_sha]) scoresBySha[v.commit_sha] = {};
+    scoresBySha[v.commit_sha][v.commit_author_github] = Number(v.score);
   }
 
-  const totalScore = Object.values(byAuthor).reduce((s, x) => s + x, 0);
-  const myScore = byAuthor[githubUsername] || 0;
+  // Sort all project commits chronologically to use as the time axis
+  const allSorted = [...allProjectCommits].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const myShas = new Set(authorCommits.map(c => c.sha));
 
-  // If no votes at all, weight stays 0 — show flat line
-  if (totalScore === 0) {
-    return authorCommits.map(c => ({ sha: c.sha, date: c.date, weight: 0 }));
+  // Dynamic denominator: at each of THIS user's commits, weight = user's cumulative
+  // score so far / total score distributed so far across all authors. Shows the user's
+  // share rising and falling as the project progresses. Final point matches pie chart.
+  let myScore = 0;
+  let totalScore = 0;
+  const history = [];
+
+  for (const commit of allSorted) {
+    const authorsForSha = scoresBySha[commit.sha] || {};
+    for (const score of Object.values(authorsForSha)) totalScore += score;
+    if (myShas.has(commit.sha)) {
+      myScore += authorsForSha[githubUsername] || 0;
+      const weight = totalScore > 0
+        ? parseFloat(((myScore / totalScore) * 100).toFixed(2))
+        : 0;
+      history.push({ sha: commit.sha, date: commit.date, weight });
+    }
   }
 
-  // Each commit point gets the same final weight (snapshot at certificate issue time)
-  // This is honest: the certificate reflects the leaderboard at the moment it was issued
-  const finalWeight = parseFloat(((myScore / totalScore) * 100).toFixed(2));
-  return authorCommits.map(c => ({ sha: c.sha, date: c.date, weight: finalWeight }));
+  return history;
 }
 
 // Build the full certificate payload for one member
@@ -130,6 +165,11 @@ async function buildCertificatePayload(userId, projectId, triggerType) {
         [projectId, user.github_username]
       );
 
+      const { rows: allProjectCommits } = await pool.query(
+        `SELECT sha, date FROM mock_commits WHERE project_id = $1 ORDER BY date ASC`,
+        [projectId]
+      );
+
       const shas = authorCommits.map(c => c.sha);
       const ratingsMap = shas.length ? await commitVoteDb.getAverages(projectId, shas) : {};
 
@@ -139,7 +179,7 @@ async function buildCertificatePayload(userId, projectId, triggerType) {
         voteCount: ratingsMap[c.sha]?.count || 0
       }));
 
-      payload.weightHistory = await buildWeightHistory(projectId, user.github_username, authorCommits);
+      payload.weightHistory = await buildWeightHistory(projectId, user.github_username, authorCommits, allProjectCommits);
 
       // Pie: total star rating points earned per author (commit_votes SUM)
       const { rows: voteScores } = await pool.query(
@@ -174,7 +214,9 @@ async function buildCertificatePayload(userId, projectId, triggerType) {
       voteCount: ratingsMap[c.sha]?.count || 0
     }));
 
-    payload.weightHistory = await buildWeightHistory(projectId, user.github_username, authorCommits);
+    // Fetch all project commits for weight history context (all authors)
+    const allProjectCommits = await fetchAllProjectCommits(project.github_repo, accessToken);
+    payload.weightHistory = await buildWeightHistory(projectId, user.github_username, authorCommits, allProjectCommits);
 
     // Pie: total star rating points earned per author (commit_votes SUM)
     const { rows: voteScores } = await pool.query(

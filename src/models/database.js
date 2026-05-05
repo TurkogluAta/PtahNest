@@ -1533,26 +1533,56 @@ const commitVoteDb = {
   // Returns array: [{ githubUsername, score, commits, avgRating, normalizedWeight }]
   // normalizedWeight is 0-100 float, all members sum to 100.
   async getLeaderboard(projectId) {
-    const { rows } = await pool.query(
+    // Pull vote stats per author
+    const { rows: voteRows } = await pool.query(
       `SELECT commit_author_github AS github_username,
               COUNT(DISTINCT commit_sha)::int AS commits,
               SUM(rating)::numeric AS total_rating,
               AVG(rating)::numeric(3,1) AS avg_rating
        FROM commit_votes
        WHERE project_id = $1 AND commit_author_github IS NOT NULL
-       GROUP BY commit_author_github
-       ORDER BY total_rating DESC`,
+       GROUP BY commit_author_github`,
       [projectId]
     );
-    const totalScore = rows.reduce((sum, r) => sum + parseFloat(r.total_rating), 0);
-    return rows.map(r => ({
-      githubUsername: r.github_username,
-      commits: r.commits,
-      avgRating: parseFloat(r.avg_rating),
-      score: parseFloat(r.total_rating),
-      // weight as share of 100; if no votes at all, returns 0 for everyone
-      normalizedWeight: totalScore > 0 ? (parseFloat(r.total_rating) / totalScore) * 100 : 0
+
+    // Pull all active members with linked GitHub so unstarred members still appear
+    const { rows: memberRows } = await pool.query(
+      `SELECT u.github_username
+       FROM project_members pm
+       JOIN users u ON pm.user_id = u.id
+       WHERE pm.project_id = $1 AND pm.membership_status = 'active' AND u.github_username IS NOT NULL`,
+      [projectId]
+    );
+
+    // Merge: every active member gets a base weight of 1; vote totals stack on top
+    const map = {};
+    for (const m of memberRows) {
+      map[m.github_username] = { github_username: m.github_username, commits: 0, total_rating: 0, avg_rating: 0 };
+    }
+    for (const v of voteRows) {
+      if (!map[v.github_username]) map[v.github_username] = { github_username: v.github_username, commits: 0, total_rating: 0, avg_rating: 0 };
+      map[v.github_username].commits = v.commits;
+      map[v.github_username].total_rating = parseFloat(v.total_rating);
+      map[v.github_username].avg_rating = parseFloat(v.avg_rating);
+    }
+
+    const merged = Object.values(map).map(r => ({
+      ...r,
+      // Effective score = vote total + 5 base (gives early-stage members democratic weight,
+      // meritocracy kicks in as votes accumulate)
+      effective: r.total_rating + 5
     }));
+
+    const totalEffective = merged.reduce((sum, r) => sum + r.effective, 0);
+    return merged
+      .map(r => ({
+        githubUsername: r.github_username,
+        commits: r.commits,
+        avgRating: r.avg_rating,
+        score: r.total_rating,
+        normalizedWeight: totalEffective > 0 ? (r.effective / totalEffective) * 100 : 0
+      }))
+      .sort((a, b) => b.score - a.score);
   },
 
   // Get normalized weight (0-100) for a single GitHub username in a project.

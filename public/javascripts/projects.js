@@ -97,7 +97,7 @@ function renderProjectCard(project) {
 
     // Repo badge for software projects with a linked GitHub repo
     const repoTagHTML = project.projectType === 'software' && project.githubRepo
-        ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14">${project.githubRepo}</span>`
+        ? `<span class="repo-tag"><img src="../pictures/icons/github.svg" width="14" height="14"><span class="repo-tag-name">${project.githubRepo}</span></span>`
         : '';
 
     const lookingForHTML = project.lookingFor && project.lookingFor.length > 0
@@ -118,16 +118,14 @@ function renderProjectCard(project) {
     return `
         <div class="card card-hover card-bottom-gap card-clickable" onclick="window.location.href='/pages/project-detail.html?id=${project.id}'">
             <div class="project-card-header">
-                <div>
-                    <div class="card-title">${project.name}</div>
-                    <div class="card-desc no-margin">${project.description}</div>
-                </div>
-                <div class="badge-group">
+                <div class="card-title">${project.name}</div>
+                <div class="badge-group" style="flex-wrap: wrap; margin-bottom: 0.25rem;">
                     ${project.status === 'completed' && project.role === 'creator' ? '<img src="../pictures/icons/purple-star.svg" width="20" height="20" title="Project Creator">' : ''}
                     ${repoTagHTML}
                     ${(() => { const t = PROJECT_TYPES[project.projectType] || PROJECT_TYPES.software; return `<span class="badge ${t.badgeClass}">${t.label}</span>`; })()}
                     <span class="badge ${getBadgeClass(project.status)}">${getBadgeText(project.status)}</span>
                 </div>
+                <div class="card-desc no-margin">${project.description}</div>
             </div>
             ${tagsHTML}
             ${lookingForHTML}

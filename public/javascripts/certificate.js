@@ -30,6 +30,17 @@ function arc(cx, cy, r, a1, a2) {
     return `M ${cx} ${cy} L ${s.x} ${s.y} A ${r} ${r} 0 ${a2 - a1 > 180 ? 1 : 0} 1 ${e.x} ${e.y} Z`;
 }
 
+// Draw a star icon via <image href> referencing external SVG files.
+// mode: 'full' | 'half' — uses /pictures/icons/star-filled.svg and star-half.svg
+function drawStar(svg, x, y, size, mode) {
+    const href = mode === 'half'
+        ? '/pictures/icons/star-half.svg'
+        : '/pictures/icons/star-filled.svg';
+    svg.appendChild(el('image', {
+        href, x, y, width: size, height: size
+    }));
+}
+
 // ─── Design tokens ───────────────────────────────────────────────────────────
 
 const C = {
@@ -78,6 +89,7 @@ function renderCertificate(cert, certId) {
     svg.appendChild(el('rect', { width: W, height: H, fill: C.bg }));
     svg.appendChild(el('rect', { x: 1, y: 1, width: W-2, height: H-2, rx: 12, fill: 'none', stroke: C.border, 'stroke-width': 1 }));
 
+    console.log('[cert] weightHistory:', JSON.stringify(payload.weightHistory));
     drawHeader(svg, payload);
     if (payload.projectType === 'research') {
         drawResearchThanks(svg);
@@ -202,13 +214,24 @@ function drawTimeline(svg, timeline) {
         // Dot
         svg.appendChild(el('circle', { cx, cy: Y, r: 5, fill: hasRating ? C.accent : C.border, stroke: C.bg, 'stroke-width': 2 }));
 
-        // Stars above — centered on dot
+        // Stars above — centered on dot. Inline SVG stars with half-star support
         if (hasRating) {
-            const stars = Math.round(c.rating);
-            svg.appendChild(txt('★'.repeat(stars), {
-                x: cx, y: Y - 16, fill: C.gold, 'font-size': 9,
-                'text-anchor': 'middle', 'dominant-baseline': 'auto'
-            }));
+            const full = Math.floor(c.rating);
+            const frac = c.rating - full;
+            const hasHalf = frac >= 0.25 && frac < 0.75;
+            const fullCount = frac >= 0.75 ? full + 1 : full;
+            const totalStars = fullCount + (hasHalf ? 1 : 0);
+            const starSize = 9;
+            const starGap = 1;
+            const totalW = totalStars * starSize + (totalStars - 1) * starGap;
+            let sx = cx - totalW / 2;
+            const sy = Y - 16 - starSize;
+            for (let s = 0; s < fullCount; s++) {
+                drawStar(svg, sx, sy, starSize, 'full');
+                sx += starSize + starGap;
+            }
+            if (hasHalf) drawStar(svg, sx, sy, starSize, 'half');
+
             svg.appendChild(txt(c.rating.toFixed(1), {
                 x: cx, y: Y - 6, fill: C.dim, 'font-size': 7,
                 'text-anchor': 'middle', 'dominant-baseline': 'auto'
