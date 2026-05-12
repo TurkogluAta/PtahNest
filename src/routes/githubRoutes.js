@@ -232,10 +232,12 @@ router.get('/commits/:projectId', requireAuth, async (req, res) => {
     }
 
     // Return only needed fields
+    // Prefer GitHub login (c.author.login) over git config name (c.commit.author.name)
+    // so that frontend self-vote check matches against member.github_username correctly.
     const commitList = commits.map(c => ({
       sha: c.sha,
       message: c.commit.message,
-      author: c.commit.author.name,
+      author: c.author ? c.author.login : c.commit.author.name,
       date: c.commit.author.date,
       url: c.html_url,
       avatar: c.author ? c.author.avatar_url : null

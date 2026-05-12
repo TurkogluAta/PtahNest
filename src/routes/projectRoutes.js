@@ -1428,6 +1428,16 @@ router.post('/:id/commit-votes', requireAuth, paramIdValidation, commitVoteValid
     const projectId = req.params.id;
     const { sha, rating, commitAuthor } = req.body;
 
+    // Self-vote guard: a member cannot rate their own commits.
+    // Compare commitAuthor (GitHub login) to voter's linked github_username.
+    if (commitAuthor) {
+      const voterGithub = await githubDb.getGithubInfo(req.session.userId);
+      if (voterGithub && voterGithub.github_username &&
+          voterGithub.github_username.toLowerCase() === String(commitAuthor).toLowerCase()) {
+        return res.status(403).json({ success: false, message: "Can't rate your own commit" });
+      }
+    }
+
     await commitVoteDb.upsert(projectId, sha, req.session.userId, rating, commitAuthor || null);
 
     // Return updated avg for instant UI feedback
