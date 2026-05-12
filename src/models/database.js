@@ -1,8 +1,17 @@
 const { Pool, Client } = require('pg');
+const { decrypt } = require('../utils/encryption');
 
 // Safe JSON parse with fallback
 function safeJsonParse(str, fallback = []) {
   try { return JSON.parse(str); } catch { return fallback; }
+}
+
+// Safe decrypt with fallback — used when surfacing the first chat message
+// of a join request as a preview field. Returns null if decryption fails so
+// the API never leaks ciphertext to clients.
+function safeDecrypt(value) {
+  if (!value) return null;
+  try { return decrypt(value); } catch { return null; }
 }
 
 // Auto-create database if it doesn't exist
@@ -97,30 +106,20 @@ async function initDatabase() {
     )
   `);
 
-  // Add github_id column to project_members if it doesn't exist (migration)
-  await pool.query(`
-    ALTER TABLE project_members ADD COLUMN IF NOT EXISTS github_id BIGINT
-  `);
-
-  // Join requests table
+  // Join requests table — intro message is stored encrypted in
+  // join_request_messages as the first chat message, never in plaintext here.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS join_requests (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       status TEXT NOT NULL,
-      message TEXT,
       github_id BIGINT,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       FOREIGN KEY (project_id) REFERENCES projects(id),
       FOREIGN KEY (user_id) REFERENCES users(id),
       UNIQUE(project_id, user_id)
     )
-  `);
-
-  // Add github_id column to join_requests if it doesn't exist (migration)
-  await pool.query(`
-    ALTER TABLE join_requests ADD COLUMN IF NOT EXISTS github_id BIGINT
   `);
 
   // Temporary chat messages for join requests (deleted on accept/reject)
@@ -194,10 +193,6 @@ async function initDatabase() {
       UNIQUE(vote_id, voter_user_id)
     )
   `);
-  // Migration: add weight column if missing (existing deployments)
-  await pool.query(`
-    ALTER TABLE kick_vote_ballots ADD COLUMN IF NOT EXISTS weight NUMERIC(6,2) NOT NULL DEFAULT 1
-  `);
 
   // Health issue acknowledgments — creator/mod can mark issues as read
   await pool.query(`
@@ -263,10 +258,6 @@ async function initDatabase() {
       FOREIGN KEY (voter_id) REFERENCES users(id) ON DELETE CASCADE,
       UNIQUE (project_id, commit_sha, voter_id)
     )
-  `);
-  // Migration: add commit_author_github if missing (existing deployments)
-  await pool.query(`
-    ALTER TABLE commit_votes ADD COLUMN IF NOT EXISTS commit_author_github TEXT
   `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_cv_project_sha ON commit_votes(project_id, commit_sha)
@@ -423,6 +414,24 @@ const userDb = {
       github_username: user.github_id ? user.github_username : null,
       projects
     };
+  },
+
+  // Just the github_username for a user (null if not linked)
+  async getGithubUsername(userId) {
+    const { rows } = await pool.query(
+      `SELECT github_username FROM users WHERE id = $1`,
+      [userId]
+    );
+    return rows[0]?.github_username || null;
+  },
+
+  // Encrypted github_token for a user (null if not linked) — caller must decrypt
+  async getEncryptedGithubToken(userId) {
+    const { rows } = await pool.query(
+      `SELECT github_token FROM users WHERE id = $1`,
+      [userId]
+    );
+    return rows[0]?.github_token || null;
   }
 };
 
@@ -965,19 +974,61 @@ const memberDb = {
       [projectId]
     );
     return rows;
+  },
+
+  // Find any past or present membership for a given github_id (kicked/left/active snapshot check)
+  async findByGithubId(projectId, githubId) {
+    const { rows } = await pool.query(
+      `SELECT membership_status FROM project_members WHERE project_id = $1 AND github_id = $2`,
+      [projectId, githubId]
+    );
+    return rows[0] || null;
+  },
+
+  // Most recent past membership (left or kicked) across a set of linked user accounts
+  async findMostRecentPastMembership(projectId, userIds) {
+    const { rows } = await pool.query(
+      `SELECT membership_status, left_at FROM project_members
+       WHERE project_id = $1 AND user_id = ANY($2::text[]) AND membership_status IN ('left', 'kicked')
+       ORDER BY left_at DESC LIMIT 1`,
+      [projectId, userIds]
+    );
+    return rows[0] || null;
+  },
+
+  // Active membership row with joined_at (for kick-vote eligibility check)
+  async findActiveWithJoinedAt(projectId, userId) {
+    const { rows } = await pool.query(
+      `SELECT joined_at FROM project_members WHERE project_id = $1 AND user_id = $2 AND membership_status = 'active'`,
+      [projectId, userId]
+    );
+    return rows[0] || null;
+  },
+
+  // All active members except a target user, with github_username (for kick-vote eligibility list)
+  async getEligibleVoters(projectId, excludeUserId) {
+    const { rows } = await pool.query(
+      `SELECT pm.user_id, u.github_username
+       FROM project_members pm
+       JOIN users u ON pm.user_id = u.id
+       WHERE pm.project_id = $1 AND pm.membership_status = 'active' AND pm.user_id != $2`,
+      [projectId, excludeUserId]
+    );
+    return rows;
   }
 };
 
 // Join requests database operations
 const joinRequestDb = {
-  // Create join request (github_id snapshot for software projects)
-  async create(projectId, userId, message = null, githubId = null) {
+  // Create join request. Any intro message is stored encrypted in
+  // join_request_messages by the caller; nothing is persisted in plaintext here.
+  async create(projectId, userId, githubId = null) {
     const id = require('crypto').randomUUID();
     await pool.query(
-      `INSERT INTO join_requests (id, project_id, user_id, status, message, github_id) VALUES ($1, $2, $3, 'pending', $4, $5)`,
-      [id, projectId, userId, message, githubId]
+      `INSERT INTO join_requests (id, project_id, user_id, status, github_id) VALUES ($1, $2, $3, 'pending', $4)`,
+      [id, projectId, userId, githubId]
     );
-    return { id, projectId, userId, status: 'pending', message };
+    return { id, projectId, userId, status: 'pending' };
   },
 
   // Check if user has pending request
@@ -1026,6 +1077,7 @@ const joinRequestDb = {
   async getPendingRequests(projectId) {
     const { rows } = await pool.query(
       `SELECT jr.*, u.username, u.email, u.github_username,
+              (SELECT m.encrypted_content FROM join_request_messages m WHERE m.request_id = jr.id AND m.sender_id = jr.user_id ORDER BY m.created_at ASC LIMIT 1) as intro_message_encrypted,
               (SELECT m.sender_id FROM join_request_messages m WHERE m.request_id = jr.id ORDER BY m.created_at DESC LIMIT 1) as last_message_sender_id,
               (SELECT COUNT(*) FROM join_request_messages m WHERE m.request_id = jr.id AND m.sender_id != jr.user_id) as management_message_count,
               (SELECT ROUND(AVG(sub.avg_rating), 1) FROM (
@@ -1039,7 +1091,12 @@ const joinRequestDb = {
       ORDER BY jr.created_at DESC`,
       [projectId]
     );
-    return rows;
+    // Decrypt the applicant's first chat message and expose it as `message`
+    // for backward compatibility with the existing frontend preview UI.
+    return rows.map(r => {
+      const { intro_message_encrypted, ...rest } = r;
+      return { ...rest, message: safeDecrypt(intro_message_encrypted) };
+    });
   },
 
   // Get request by ID
@@ -1077,8 +1134,9 @@ const joinRequestDb = {
 
   async getByUserId(userId) {
     const { rows } = await pool.query(
-      `SELECT jr.id, jr.project_id, jr.status, jr.created_at, jr.message,
+      `SELECT jr.id, jr.project_id, jr.status, jr.created_at,
               p.name as project_name, p.description, p.tags, p.github_repo, p.project_type,
+              (SELECT m.encrypted_content FROM join_request_messages m WHERE m.request_id = jr.id AND m.sender_id = jr.user_id ORDER BY m.created_at ASC LIMIT 1) as intro_message_encrypted,
               (SELECT m.created_at FROM join_request_messages m WHERE m.request_id = jr.id ORDER BY m.created_at DESC LIMIT 1) as last_message_at,
               (SELECT m.sender_id FROM join_request_messages m WHERE m.request_id = jr.id ORDER BY m.created_at DESC LIMIT 1) as last_message_sender_id
        FROM join_requests jr
@@ -1087,7 +1145,37 @@ const joinRequestDb = {
        ORDER BY jr.created_at DESC`,
       [userId]
     );
-    return rows;
+    return rows.map(r => {
+      const { intro_message_encrypted, ...rest } = r;
+      return { ...rest, message: safeDecrypt(intro_message_encrypted) };
+    });
+  },
+
+  // Active (pending/accepted) request snapshot tied to a github_id (cross-account block)
+  async findActiveByGithubId(projectId, githubId) {
+    const { rows } = await pool.query(
+      `SELECT status FROM join_requests WHERE project_id = $1 AND github_id = $2 AND status IN ('pending', 'accepted')`,
+      [projectId, githubId]
+    );
+    return rows[0] || null;
+  },
+
+  // Any pending request across a set of linked user accounts
+  async hasPendingForUsers(projectId, userIds) {
+    const { rows } = await pool.query(
+      `SELECT id FROM join_requests
+       WHERE project_id = $1 AND user_id = ANY($2::text[]) AND status = 'pending' LIMIT 1`,
+      [projectId, userIds]
+    );
+    return rows.length > 0;
+  },
+
+  // Purge old rejected requests across a set of linked user accounts
+  async deleteRejectedForUsers(projectId, userIds) {
+    await pool.query(
+      `DELETE FROM join_requests WHERE project_id = $1 AND user_id = ANY($2::text[]) AND status = 'rejected'`,
+      [projectId, userIds]
+    );
   }
 };
 
@@ -1311,6 +1399,20 @@ const githubDb = {
       [projectId, hours]
     );
     return Number(rows[0].count);
+  },
+
+  // Mock commits for projects whose repo name contains "mock" (demo/testing flow)
+  async getMockCommits(projectId) {
+    const { rows } = await pool.query(
+      `SELECT mc.sha, mc.author_github, mc.message, mc.date,
+              u.username AS author
+       FROM mock_commits mc
+       LEFT JOIN users u ON u.github_username = mc.author_github
+       WHERE mc.project_id = $1
+       ORDER BY mc.date DESC`,
+      [projectId]
+    );
+    return rows;
   }
 };
 
@@ -1641,6 +1743,28 @@ const certificateDb = {
   async findById(certId) {
     const { rows } = await pool.query(
       `SELECT * FROM certificates WHERE id = $1`,
+      [certId]
+    );
+    return rows[0] || null;
+  },
+
+  // Public verification view — limited fields, no sensitive payload
+  async findVerificationById(certId) {
+    const { rows } = await pool.query(
+      `SELECT c.id, c.trigger_type, c.was_creator, c.issued_at,
+              c.payload->>'projectName' AS project_name,
+              c.payload->>'username' AS username,
+              c.payload->>'issuedMonth' AS issued_month,
+              c.payload->>'projectType' AS project_type,
+              jsonb_array_length(c.payload->'timeline') AS commit_count,
+              (
+                SELECT ROUND(AVG((elem->>'rating')::numeric), 1)
+                FROM jsonb_array_elements(c.payload->'timeline') AS elem
+                WHERE elem->>'rating' IS NOT NULL
+              ) AS avg_rating,
+              c.payload->>'githubUsername' AS github_username,
+              c.payload->'monthlyEffortPie' AS effort_pie
+       FROM certificates c WHERE c.id = $1`,
       [certId]
     );
     return rows[0] || null;

@@ -24,25 +24,9 @@ const paramCertIdValidation = [
 // GET /api/certificates/verify/:id — public, no auth needed
 router.get('/verify/:id', async (req, res) => {
   try {
-    const { rows } = await require('../models/database').pool.query(
-      `SELECT c.id, c.trigger_type, c.was_creator, c.issued_at,
-              c.payload->>'projectName' AS project_name,
-              c.payload->>'username' AS username,
-              c.payload->>'issuedMonth' AS issued_month,
-              c.payload->>'projectType' AS project_type,
-              jsonb_array_length(c.payload->'timeline') AS commit_count,
-              (
-                SELECT ROUND(AVG((elem->>'rating')::numeric), 1)
-                FROM jsonb_array_elements(c.payload->'timeline') AS elem
-                WHERE elem->>'rating' IS NOT NULL
-              ) AS avg_rating,
-              c.payload->>'githubUsername' AS github_username,
-              c.payload->'monthlyEffortPie' AS effort_pie
-       FROM certificates c WHERE c.id = $1`,
-      [req.params.id]
-    );
-    if (!rows.length) return res.status(404).json({ success: false, message: 'Certificate not found' });
-    res.json({ success: true, data: { certificate: rows[0] } });
+    const cert = await certificateDb.findVerificationById(req.params.id);
+    if (!cert) return res.status(404).json({ success: false, message: 'Certificate not found' });
+    res.json({ success: true, data: { certificate: cert } });
   } catch (err) {
     console.error('Verify certificate error:', err);
     res.status(500).json({ success: false, message: 'Server error' });

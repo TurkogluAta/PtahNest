@@ -308,11 +308,21 @@ function openProjectModal(projectId) {
     // Join button based on auth status
     const joinButtonHTML = isUserLoggedIn
         ? `<button class="btn btn-primary" onclick="joinProject('${projectId}')">
-             Join Project
+             Send Join Request
            </button>`
         : `<a href="auth.html" class="btn btn-primary">
              Login to Join
            </a>`;
+
+    // Initial chat message field (only for logged-in users)
+    const introMessageHTML = isUserLoggedIn
+        ? `<div class="join-intro-group">
+             <div class="input-label">Introduce yourself <span class="join-intro-label-hint">(optional, max 500 chars)</span></div>
+             <textarea id="joinIntroMessage" class="input-field" rows="3" maxlength="500"
+                placeholder="Hi! I'd like to join because..."></textarea>
+             <div class="join-intro-help">This becomes the first message in your chat with the project team.</div>
+           </div>`
+        : '';
 
     const modalContent = `
         <div class="card-title" style="font-size: 1.5rem; margin-bottom: 1rem;">
@@ -341,6 +351,8 @@ function openProjectModal(projectId) {
             <p class="card-desc">${project.creator_username || 'Anonymous'}</p>
         </div>
 
+        ${introMessageHTML}
+
         <div style="margin-top: 2rem; display: flex; gap: 1rem;">
             ${joinButtonHTML}
             <button class="btn btn-outline" onclick="closeProjectModal()">Close</button>
@@ -361,10 +373,14 @@ function closeProjectModal() {
 // Join project
 async function joinProject(projectId) {
     try {
+        // Read optional intro message from modal textarea
+        const introInput = document.getElementById('joinIntroMessage');
+        const introMessage = introInput ? introInput.value.trim() : '';
+
         const response = await fetch(`/api/projects/${projectId}/join`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({}) // Can add message later
+            body: JSON.stringify(introMessage ? { message: introMessage } : {})
         });
 
         const data = await response.json();

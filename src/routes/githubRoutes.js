@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const router = express.Router();
-const { githubDb, projectDb, memberDb, pool, commitVoteDb } = require('../models/database');
+const { githubDb, projectDb, memberDb, commitVoteDb } = require('../models/database');
 const { encrypt, decrypt } = require('../utils/encryption');
 
 // Auth middleware - require logged in user
@@ -178,15 +178,7 @@ router.get('/commits/:projectId', requireAuth, async (req, res) => {
     if (project.github_repo.includes('mock')) {
       const page = parseInt(req.query.page) || 1;
       const perPage = 5;
-      const { rows: mockCommits } = await pool.query(
-        `SELECT mc.sha, mc.author_github, mc.message, mc.date,
-                u.username AS author
-         FROM mock_commits mc
-         LEFT JOIN users u ON u.github_username = mc.author_github
-         WHERE mc.project_id = $1
-         ORDER BY mc.date DESC`,
-        [project.id]
-      );
+      const mockCommits = await githubDb.getMockCommits(project.id);
       const paginated = mockCommits.slice((page - 1) * perPage, page * perPage);
       return res.json({
         success: true,

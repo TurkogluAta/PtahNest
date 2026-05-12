@@ -436,24 +436,17 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
       snapshotGithubId = githubInfo.github_id;
 
       // Block if this GitHub account was previously a member (kicked or left) under any PtahNest user
-      const { rows: githubMemberRows } = await pool.query(
-        `SELECT membership_status FROM project_members WHERE project_id = $1 AND github_id = $2`,
-        [projectId, snapshotGithubId]
-      );
-      if (githubMemberRows.length > 0) {
-        const status = githubMemberRows[0].membership_status;
-        const msg = status === 'kicked'
+      const githubMember = await memberDb.findByGithubId(projectId, snapshotGithubId);
+      if (githubMember) {
+        const msg = githubMember.membership_status === 'kicked'
           ? 'This GitHub account was removed from this project and cannot rejoin.'
           : 'This GitHub account has already been part of this project.';
         return res.status(400).json({ success: false, message: msg });
       }
 
       // Block if this GitHub account has a pending/accepted join request under any PtahNest user
-      const { rows: githubRequestRows } = await pool.query(
-        `SELECT status FROM join_requests WHERE project_id = $1 AND github_id = $2 AND status IN ('pending', 'accepted')`,
-        [projectId, snapshotGithubId]
-      );
-      if (githubRequestRows.length > 0) {
+      const githubRequest = await joinRequestDb.findActiveByGithubId(projectId, snapshotGithubId);
+      if (githubRequest) {
         return res.status(400).json({ success: false, message: 'This GitHub account already has an active request for this project.' });
       }
     }
@@ -474,13 +467,7 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
     }
 
     // Check if any linked account has left or been kicked from this project
-    const { rows: pastRows } = await pool.query(
-      `SELECT membership_status, left_at FROM project_members
-       WHERE project_id = $1 AND user_id = ANY($2::text[]) AND membership_status IN ('left', 'kicked')
-       ORDER BY left_at DESC LIMIT 1`,
-      [projectId, allUserIds]
-    );
-    const pastMembership = pastRows[0] || null;
+    const pastMembership = await memberDb.findMostRecentPastMembership(projectId, allUserIds);
 
     if (pastMembership) {
       if (pastMembership.membership_status === 'kicked') {
@@ -502,12 +489,7 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
     }
 
     // Check if any linked account has a pending request
-    const { rows: pendingRows } = await pool.query(
-      `SELECT id FROM join_requests
-       WHERE project_id = $1 AND user_id = ANY($2::text[]) AND status = 'pending' LIMIT 1`,
-      [projectId, allUserIds]
-    );
-    if (pendingRows.length > 0) {
+    if (await joinRequestDb.hasPendingForUsers(projectId, allUserIds)) {
       return res.status(400).json({
         success: false,
         message: 'You already have a pending request for this project'
@@ -524,13 +506,23 @@ router.post('/:id/join', requireAuth, paramIdValidation, joinRequestValidation, 
     }
 
     // If there's an old rejected request (>30 days), delete it before creating new one
-    await pool.query(
-      `DELETE FROM join_requests WHERE project_id = $1 AND user_id = ANY($2::text[]) AND status = 'rejected'`,
-      [projectId, allUserIds]
-    );
+    await joinRequestDb.deleteRejectedForUsers(projectId, allUserIds);
 
-    // Create join request (snapshot github_id for software projects)
-    const joinRequest = await joinRequestDb.create(projectId, userId, message, snapshotGithubId);
+    // Create join request (snapshot github_id for software projects).
+    // The intro message is NOT stored on the join_requests row — it is
+    // seeded below as the first encrypted message in the request chat.
+    const joinRequest = await joinRequestDb.create(projectId, userId, snapshotGithubId);
+
+    // If applicant included an intro message, also seed the request chat with it
+    if (message && message.trim().length > 0) {
+      try {
+        const encrypted = encrypt(message.trim());
+        await joinRequestMessageDb.create(joinRequest.id, userId, encrypted);
+      } catch (msgErr) {
+        // Chat seed failure shouldn't break the join request itself
+        console.error('Failed to seed join request chat with intro message:', msgErr);
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -795,14 +787,7 @@ async function resolveVoteIfNeeded(vote, project) {
   const expired = new Date(vote.expires_at) < now;
 
   // Get all eligible voters (active members except target)
-  const eligibleRes = await pool.query(
-    `SELECT pm.user_id, u.github_username
-     FROM project_members pm
-     JOIN users u ON pm.user_id = u.id
-     WHERE pm.project_id = $1 AND pm.membership_status = 'active' AND pm.user_id != $2`,
-    [vote.project_id, vote.target_user_id]
-  );
-  const eligible = eligibleRes.rows;
+  const eligible = await memberDb.getEligibleVoters(vote.project_id, vote.target_user_id);
   const totalEligible = eligible.length;
   if (totalEligible === 0) return vote;
 
@@ -921,12 +906,9 @@ router.post('/:id/kick-votes/:voteId/ballot', requireAuth, paramIdValidation, pa
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
 
     // Must be active member — fetch with joined_at for eligibility check
-    const { rows: memberRows } = await pool.query(
-      `SELECT joined_at FROM project_members WHERE project_id = $1 AND user_id = $2 AND membership_status = 'active'`,
-      [projectId, userId]
-    );
+    const memberRow = await memberDb.findActiveWithJoinedAt(projectId, userId);
     const isCreator = project.creator_id === userId;
-    if (!isCreator && memberRows.length === 0) {
+    if (!isCreator && !memberRow) {
       return res.status(403).json({ success: false, message: 'You must be a project member to vote' });
     }
 
@@ -936,7 +918,7 @@ router.post('/:id/kick-votes/:voteId/ballot', requireAuth, paramIdValidation, pa
     }
 
     // Members who joined after the vote started cannot vote
-    if (!isCreator && memberRows[0].joined_at > vote.created_at) {
+    if (!isCreator && memberRow.joined_at > vote.created_at) {
       return res.status(403).json({ success: false, message: 'You joined after this vote started and cannot participate' });
     }
 
@@ -950,11 +932,7 @@ router.post('/:id/kick-votes/:voteId/ballot', requireAuth, paramIdValidation, pa
     }
 
     // Already voted — no changes allowed
-    const { rows: existingBallot } = await pool.query(
-      'SELECT id FROM kick_vote_ballots WHERE vote_id = $1 AND voter_user_id = $2',
-      [vote.id, userId]
-    );
-    if (existingBallot.length > 0) {
+    if (await kickVoteDb.getBallot(vote.id, userId) !== null) {
       return res.status(400).json({ success: false, message: 'You have already voted and cannot change your vote' });
     }
 
@@ -967,8 +945,7 @@ router.post('/:id/kick-votes/:voteId/ballot', requireAuth, paramIdValidation, pa
     // Determine voter's weight: leaderboard share for software projects, 1 for research
     let voterWeight = 1;
     if (project.projectType === 'software' && project.github_repo) {
-      const voterUser = await pool.query(`SELECT github_username FROM users WHERE id = $1`, [userId]);
-      const githubUsername = voterUser.rows[0]?.github_username;
+      const githubUsername = await userDb.getGithubUsername(userId);
       if (githubUsername) {
         voterWeight = await commitVoteDb.getWeight(projectId, githubUsername);
       }
@@ -1109,6 +1086,20 @@ async function requireMemberAny(req, res, next) {
   }
 }
 
+// Read actions: user must be active member, project can be completed/deleted
+async function requireActiveProject(req, res, next) {
+  try {
+    const project = await projectDb.findById(req.params.id, req.session.userId);
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+    if (!project.role) return res.status(403).json({ success: false, message: 'Members only' });
+    if (project.memberStatus !== 'active') return res.status(403).json({ success: false, message: 'You are no longer an active member of this project' });
+    next();
+  } catch (err) {
+    console.error('requireActiveProject error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+}
+
 // Write actions: only active members of an active project
 async function requireActiveMember(req, res, next) {
   try {
@@ -1137,7 +1128,7 @@ router.post('/:id/messages', requireAuth, paramIdValidation, messageContentValid
 });
 
 // GET: Fetch project chat messages
-router.get('/:id/messages', requireAuth, paramIdValidation, requireMemberAny, async (req, res) => {
+router.get('/:id/messages', requireAuth, paramIdValidation, requireActiveProject, async (req, res) => {
   try {
     const rows = await projectMessageDb.getByProjectId(req.params.id);
     const messages = rows.map(m => ({
@@ -1206,10 +1197,7 @@ router.get('/:id/health', requireAuth, paramIdValidation, requireManagement, asy
 
     // #4 Not a GitHub collaborator (software only, requires creator token)
     if (isSoftware && project.githubRepo) {
-      const creatorRow = await pool.query(
-        'SELECT github_token FROM users WHERE id = $1', [project.creator_id]
-      );
-      const encryptedToken = creatorRow.rows[0]?.github_token;
+      const encryptedToken = await userDb.getEncryptedGithubToken(project.creator_id);
       if (encryptedToken) {
         const token = decrypt(encryptedToken);
         const accepted = await memberDb.getAcceptedMembers(projectId);
@@ -1296,7 +1284,7 @@ router.delete('/:id/health-reads/:issueKey', requireAuth, paramIdValidation, req
 // ========================================
 
 // GET: List all todos for a project (active members only)
-router.get('/:id/todos', requireAuth, paramIdValidation, requireMemberAny, async (req, res) => {
+router.get('/:id/todos', requireAuth, paramIdValidation, requireActiveProject, async (req, res) => {
   try {
     const todos = await projectTodoDb.getByProjectId(req.params.id);
     res.json({ success: true, todos });
@@ -1405,7 +1393,7 @@ router.delete('/:id/todos/:todoId', requireAuth, paramIdValidation, paramTodoIdV
 // COMMIT VOTES
 
 // GET: Fetch avg ratings + user's votes for a list of commit SHAs
-router.get('/:id/commit-votes', requireAuth, paramIdValidation, commitShasValidation, requireMemberAny, async (req, res) => {
+router.get('/:id/commit-votes', requireAuth, paramIdValidation, commitShasValidation, requireActiveProject, async (req, res) => {
   try {
     const projectId = req.params.id;
     const shas = req.query.shas.split(',').map(s => s.trim()).filter(Boolean).slice(0, 50);
@@ -1424,7 +1412,7 @@ router.get('/:id/commit-votes', requireAuth, paramIdValidation, commitShasValida
 });
 
 // GET: Leaderboard for a project (active members only)
-router.get('/:id/leaderboard', requireAuth, paramIdValidation, requireMemberAny, async (req, res) => {
+router.get('/:id/leaderboard', requireAuth, paramIdValidation, requireActiveProject, async (req, res) => {
   try {
     const leaderboard = await commitVoteDb.getLeaderboard(req.params.id);
     res.json({ success: true, data: { leaderboard } });

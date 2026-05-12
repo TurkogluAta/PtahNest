@@ -1242,6 +1242,22 @@ textarea.input-field {
     line-height: 1.5;
 }
 
+/* Discover modal: applicant intro message field */
+.join-intro-group {
+    margin-top: 1.5rem;
+}
+
+.join-intro-label-hint {
+    opacity: 0.6;
+    font-weight: normal;
+}
+
+.join-intro-help {
+    font-size: 0.8rem;
+    opacity: 0.6;
+    margin-top: 0.25rem;
+}
+
 /* Tag button styles (for project creation form) */
 .type-toggle {
     display: flex;
