@@ -1694,6 +1694,14 @@ async function fetchCommits(page = 1) {
             return;
         }
 
+        // Empty page on page>1 means we overshot — rewind to previous page and mark end
+        if ((!data.commits || data.commits.length === 0) && page > 1) {
+            commitHasNext = false;
+            commitLoading = false;
+            fetchCommits(page - 1);
+            return;
+        }
+
         // Replace, don't accumulate — each page is independent
         allCommits = data.commits;
 
