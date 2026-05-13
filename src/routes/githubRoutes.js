@@ -225,9 +225,10 @@ router.get('/commits/:projectId', requireAuth, async (req, res) => {
     const commits = await response.json();
 
     // Parse Link header for total page info
+    // If fewer commits than perPage returned, definitely last page (Link header can be misleading)
     const linkHeader = response.headers.get('link');
     let hasNextPage = false;
-    if (linkHeader && linkHeader.includes('rel="next"')) {
+    if (commits.length >= perPage && linkHeader && linkHeader.includes('rel="next"')) {
       hasNextPage = true;
     }
 
